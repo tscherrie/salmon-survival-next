@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Fn, cameraPosition, exp, float, length, max, mix, output, positionWorld, reference, renderGroup, smoothstep, vec3, vec4 } from "three/tsl";
+import { Fn, cameraPosition, exp, float, length, max, mix, normalWorldGeometry, normalize, output, positionWorld, reference, renderGroup, smoothstep, uniform, vec3, vec4 } from "three/tsl";
 
 // Water, not air, between the viewer and everything in the river.
 //
@@ -11,6 +11,9 @@ import { Fn, cameraPosition, exp, float, length, max, mix, output, positionWorld
 // sets each frame) holds the numbers: its colour is the in-scattered light for a level view,
 // its density the green extinction per scene unit; the other channels scale from it.
 export const EXTINCTION_RATIO = new THREE.Vector3(1.55, 1.0, 1.12);
+// The same ratios as a uniform, set from the river's look where the fish is: clear water
+// loses its red first, peat water its blue, the sea its red and green.
+export const extinction = uniform(EXTINCTION_RATIO.clone());
 
 let fogColor = null,
   fogDensity = null;
@@ -29,7 +32,7 @@ export const fogNodes = () => ({ color: fogColor, density: fogDensity });
 // Water between the eye and a point `distance` away along `direction`: what gets through
 // (per channel) and what is scattered in.
 export const waterBetween = Fn(([color, distance, direction]) => {
-  const transmit = exp(fogDensity.mul(distance).mul(vec3(EXTINCTION_RATIO.x, EXTINCTION_RATIO.y, EXTINCTION_RATIO.z)).negate());
+  const transmit = exp(fogDensity.mul(distance).mul(extinction).negate());
   return color.mul(transmit).add(underwaterInscatter(direction).mul(transmit.oneMinus()));
 });
 
@@ -43,4 +46,8 @@ export function installUnderwaterFog(scene) {
     const direction = ray.div(max(distance, float(1e-4)));
     return vec4(waterBetween(output.rgb, distance, direction), output.a);
   })();
+  // Where nothing is in the way, the water itself: what it scatters toward the eye, bright
+  // toward the surface and dark toward the depths -- the fog's own colour at any distance,
+  // so nothing stands out hard against it. (Above the water the sky covers it.)
+  scene.backgroundNode = underwaterInscatter(normalize(normalWorldGeometry));
 }

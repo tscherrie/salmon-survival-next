@@ -53,7 +53,7 @@ const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve))
 // The address of one point: the game with its settings, the run's name, the point's name.
 export function shotURL(set, shot, extra = "") {
   const here = new URLSearchParams(location.search);
-  for (const flag of ["stages", "webgl", "smoke"]) if (here.has(flag)) extra += `&${flag}`;
+  for (const flag of ["stages", "webgl", "smoke", "fixsun", "nomirror", "noamb"]) if (here.has(flag)) extra += `&${flag}`;
   if (here.get("probe")) extra += `&probe=${here.get("probe")}`;
   // (A run at another quality: ?shots=set&q=eco.)
   if (here.get("q")) extra += `&q=${here.get("q")}`;

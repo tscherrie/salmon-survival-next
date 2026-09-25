@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import * as TSL from "three/tsl";
-import { installUnderwaterFog } from "./render/fog.js";
-import { LIGHT_DIRECTION, river as waterUniforms, swayCanopy, waterLit, waterTime } from "./render/water.js";
-import { createCaustics } from "./render/caustics.js";
+import { extinction as waterExtinction, installUnderwaterFog } from "./render/fog.js";
+import { placeSun, river as waterUniforms, sun, swayCanopy, waterLit, waterTime } from "./render/water.js";
+import { createCaustics, driftSurface } from "./render/caustics.js";
 import { createRipples } from "./render/ripples.js";
 import { createPost } from "./render/post.js";
 import { softShadowFilter, shadowFrame } from "./render/shadows.js";
@@ -1273,15 +1273,20 @@ async function start() {
 
   // ------------------------------------------------------------------------------------
   // The water's look by region, eased as the fish moves between them.
+  // `absorb`: what the water takes out of the sunlight on its way down, per unit, red green
+  // blue -- pure water red first; the humus of the bogs (peat water, a440 of a few per metre
+  // in the lower river) blue first, so the light turns amber; the sea's clear water blue
+  // last. `extinction`: the same for the view, relative to green (the fog's density).
   const LOOKS = {
-    brook: { fog: [0.05, 0.145, 0.14], density: 0.017, canopy: 0.42, focal: 4, body: [0.02, 0.06, 0.05], tint: [0.95, 0.97, 0.98] },
-    upper: { fog: [0.052, 0.145, 0.135], density: 0.018, canopy: 0.28, focal: 7, body: [0.02, 0.06, 0.05], tint: [0.95, 0.96, 0.95] },
-    middle: { fog: [0.07, 0.15, 0.115], density: 0.021, canopy: 0.14, focal: 9, body: [0.03, 0.05, 0.035], tint: [0.98, 0.96, 0.9] },
-    lower: { fog: [0.1, 0.14, 0.08], density: 0.026, canopy: 0.05, focal: 11, body: [0.04, 0.04, 0.02], tint: [1.0, 0.94, 0.82] },
-    estuary: { fog: [0.07, 0.15, 0.13], density: 0.028, canopy: 0, focal: 12, body: [0.03, 0.06, 0.05], tint: [0.95, 0.95, 0.92] },
-    sea: { fog: [0.035, 0.18, 0.24], density: 0.011, canopy: 0, focal: 14, body: [0.01, 0.05, 0.08], tint: [0.95, 0.98, 1.0] },
+    brook: { fog: [0.05, 0.145, 0.14], density: 0.017, canopy: 0.42, focal: 4, body: [0.02, 0.06, 0.05], tint: [0.95, 0.97, 0.98], absorb: [0.034, 0.0085, 0.012], extinction: [1.6, 1.0, 1.1] },
+    upper: { fog: [0.052, 0.145, 0.135], density: 0.018, canopy: 0.28, focal: 7, body: [0.02, 0.06, 0.05], tint: [0.95, 0.96, 0.95], absorb: [0.034, 0.01, 0.017], extinction: [1.55, 1.0, 1.2] },
+    middle: { fog: [0.07, 0.15, 0.115], density: 0.021, canopy: 0.14, focal: 9, body: [0.03, 0.05, 0.035], tint: [0.98, 0.96, 0.9], absorb: [0.036, 0.016, 0.04], extinction: [1.4, 1.0, 1.45] },
+    lower: { fog: [0.1, 0.14, 0.08], density: 0.026, canopy: 0.05, focal: 11, body: [0.04, 0.04, 0.02], tint: [1.0, 0.94, 0.82], absorb: [0.042, 0.028, 0.095], extinction: [1.15, 1.0, 1.9] },
+    estuary: { fog: [0.07, 0.15, 0.13], density: 0.028, canopy: 0, focal: 12, body: [0.03, 0.06, 0.05], tint: [0.95, 0.95, 0.92], absorb: [0.04, 0.014, 0.028], extinction: [1.4, 1.0, 1.3] },
+    sea: { fog: [0.035, 0.18, 0.24], density: 0.011, canopy: 0, focal: 14, body: [0.01, 0.05, 0.08], tint: [0.95, 0.98, 1.0], absorb: [0.045, 0.008, 0.006], extinction: [2.1, 1.0, 0.85] },
   };
-  const lookNow = { fog: new THREE.Color(), density: 0.02, canopy: 0.3, focal: 6, body: new THREE.Color(), tint: new THREE.Color() };
+  const lookNow = { fog: new THREE.Color(), density: 0.02, canopy: 0.3, focal: 6, body: new THREE.Color(), tint: new THREE.Color(), absorb: new THREE.Vector3(), extinction: new THREE.Vector3() };
+  const mixV = new THREE.Vector3();
   const weights = {};
   const mix3 = new THREE.Color();
   function regionLook(s, depth) {
@@ -1290,6 +1295,8 @@ async function start() {
     lookNow.body.setRGB(0, 0, 0);
     lookNow.tint.setRGB(0, 0, 0);
     lookNow.density = lookNow.canopy = lookNow.focal = 0;
+    lookNow.absorb.set(0, 0, 0);
+    lookNow.extinction.set(0, 0, 0);
     let total = 0;
     for (const [name, w] of Object.entries(weights)) {
       if (w <= 0) continue;
@@ -1299,6 +1306,8 @@ async function start() {
       lookNow.body.add(mix3.setRGB(...l.body).multiplyScalar(w));
       lookNow.tint.add(mix3.setRGB(...l.tint).multiplyScalar(w));
       lookNow.density += l.density * w;
+      lookNow.absorb.add(mixV.fromArray(l.absorb).multiplyScalar(w));
+      lookNow.extinction.add(mixV.fromArray(l.extinction).multiplyScalar(w));
       lookNow.canopy += l.canopy * w;
       lookNow.focal += l.focal * w;
     }
@@ -1306,6 +1315,8 @@ async function start() {
     lookNow.body.multiplyScalar(1 / total);
     lookNow.tint.multiplyScalar(1 / total);
     lookNow.density /= total;
+    lookNow.absorb.multiplyScalar(1 / total);
+    lookNow.extinction.multiplyScalar(1 / total);
     lookNow.canopy /= total;
     lookNow.focal /= total;
     // Deeper water is darker and bluer.
@@ -2274,6 +2285,8 @@ async function start() {
 
   function draw(dt) {
     const day = daylight.update(dt);
+    // The sun's (or the moon's) place in the sky for the hour and the time of year.
+    if (!query.has("fixsun")) placeSun(day.hour, conditions.year);
     const rain = day.rain;
     const sunUp = day.daylight;
     const cloud = 1 - 0.62 * rain;
@@ -2305,6 +2318,7 @@ async function start() {
     treeUniforms.treeBare.value = clamp(conditions.leafFall * 0.7 + conditions.winter * 1.2 - conditions.spring * 1.2, 0, 1);
     treeUniforms.treeSnow.value = clamp(conditions.winter * 1.4 - 0.3, 0, 1) * (0.4 + 0.6 * conditions.ice);
     skyUniforms.sun.value = sunUp * cloud + 0.25 * day.moon;
+    skyUniforms.sunDirection.value.copy(sun.disk);
     skyUniforms.sunColor.value.copy(keyColor);
     skyUniforms.skyLevel.value.setRGB(1, 1, 1).lerp(DUSK_WINDOW, day.golden * 0.8).multiplyScalar(0.02 + 0.98 * sunUp).multiplyScalar(1 - 0.45 * rain);
     skyUniforms.night.value = 1 - sunUp;
@@ -2315,6 +2329,11 @@ async function start() {
     surfaceUniforms.body.value.copy(lookHere.body);
     caustics.uniforms.roughness.value = 0.9 + 0.15 * Math.sin(time * 0.05) + 0.5 * rain;
     bedMaterial.userData.tint.value.copy(lookHere.tint);
+    // The water's colour: what it takes from the light on the way down and from the view.
+    // The snowmelt flood and a flash flood's mud take more of everything, blue most.
+    const murk = 0.6 * conditions.flood * riverShare + 1.4 * events.flood * riverShare;
+    waterUniforms.absorb.value.copy(lookHere.absorb).multiplyScalar(1 + murk).add(mixV.set(0.004, 0.006, 0.012).multiplyScalar(murk));
+    waterExtinction.value.copy(lookHere.extinction);
     // Water, or air for a moment in a leap.
     const light = (0.06 + 0.94 * sunUp + 0.3 * day.golden) * (0.75 + 0.25 * cloud);
     if (above) {
@@ -2361,6 +2380,8 @@ async function start() {
       depth,
     });
     updateWaterLevel();
+    // The surface's ripples (and the caustic net they make) slide downstream; at sea, barely.
+    driftSurface(dt * (1 - 0.8 * regionWeights(cameraRiver.s).sea), at.tx, at.tz);
 
     // Shadows follow the fish, in whole texels so their edges do not crawl.
     const reach = clamp(10 + fish.length * 5, 12, 60);
@@ -2375,7 +2396,8 @@ async function start() {
       cz = Math.round(fish.position.z / texel) * texel;
     const cy = level(fish.river.s);
     key.target.position.set(cx, cy - 10, cz);
-    key.position.set(cx, cy - 10, cz).addScaledVector(LIGHT_DIRECTION, 60);
+    // From the sun as it comes down through the water -- or, in the air, as it is.
+    key.position.set(cx, cy - 10, cz).addScaledVector(above ? sun.direction : waterUniforms.lightDirection.value, 60);
     key.target.updateMatrixWorld();
 
     const appetite = salmon.appetite();

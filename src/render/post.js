@@ -37,7 +37,7 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import { EXTINCTION_RATIO } from "./fog.js";
+import { extinction } from "./fog.js";
 import { surfaceWaves } from "./caustics.js";
 import { canopyOpen, river, surfaceLevelAt, surfacePoint, waterTime } from "./water.js";
 
@@ -134,7 +134,6 @@ export function createPost(renderer, camera, settings) {
     const params = river.causticParams;
     const caustic = river.causticMap.value;
     const steps = settings.shaftSteps;
-    const extinction = vec3(EXTINCTION_RATIO.x, EXTINCTION_RATIO.y, EXTINCTION_RATIO.z);
     const henyeyGreenstein = (cosTheta, g) => float((1 - g * g) * 0.0795775).div(pow(float(1 + g * g).sub(cosTheta.mul(2 * g)), 1.5));
     return pass(
       Fn(() => {
@@ -172,7 +171,7 @@ export function createPost(renderer, camera, settings) {
           const beam = open.mul(mix(1, net, smoothstep(0.2, 3.5, below).mul(0.6).mul(params.y))).toVar();
           // Broad bands where the surface happens to be focusing more light overall.
           beam.mulAssign(texture(caustic, q.div(params.x).mul(0.21).add(vec2(waterTime.mul(0.004), 0))).level(6).r.mul(0.6).add(0.7));
-          const down = exp(vec3(0.03, 0.0085, 0.013).mul(below.div(lightDirection.y)).negate());
+          const down = exp(river.absorb.mul(below.div(lightDirection.y)).negate());
           const back = exp(extinction.mul(shaft.density.mul(1.8).mul(t)).negate());
           sum.addAssign(down.mul(back).mul(beam).mul(lit));
         });

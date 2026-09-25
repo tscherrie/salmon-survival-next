@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { Fn, If, Loop, abs, cos, dot, exp, float, length, max, mix, positionWorld, select, sin, smoothstep, texture, uniform, uniformArray, varying, vec2, vec3 } from "three/tsl";
+import { Fn, If, Loop, abs, cameraViewMatrix, cos, dot, exp, float, length, max, mix, normalView, normalize, positionViewDirection, positionWorld, reflect, select, sin, smoothstep, texture, uniform, uniformArray, varying, vec2, vec3, vec4 } from "three/tsl";
+import { underwaterInscatter } from "./fog.js";
 
 // One clock and one water model for everything the water touches: the current that bends
 // the plants, and the light the moving surface focuses onto everything beneath it (in the
@@ -24,6 +25,38 @@ export const LIGHT_DIRECTION = (() => {
   const flat = new THREE.Vector3(SUN_DIRECTION.x, 0, SUN_DIRECTION.z).normalize();
   return flat.multiplyScalar(Math.sin(refracted)).setY(Math.cos(refracted)).normalize();
 })();
+
+// The sun over a northern river (about 63 degrees north) through the day and the year: up
+// in the east at six, in the south at noon, down in the west at six in the evening (the
+// game's day), as high at noon as the season allows -- fifty degrees at midsummer, barely
+// four at midwinter. At night the moon stands opposite. Under water the light is bent
+// toward the vertical, so even a sun on the horizon comes down at under 49 degrees.
+// `sun.direction` points at the light in air (the sky's sun is `sun.disk`, which may be
+// below the horizon); `river.lightDirection` is the same light in the water.
+const DEG = Math.PI / 180;
+export const sun = { direction: SUN_DIRECTION.clone(), disk: SUN_DIRECTION.clone(), altitude: 30 * DEG };
+const toward = (altitude, azimuth, out) => out.set(Math.cos(altitude) * Math.sin(azimuth), Math.sin(altitude), -Math.cos(altitude) * Math.cos(azimuth));
+const refract = (dir, out) => {
+  const zenith = Math.acos(Math.min(1, Math.max(-1, dir.y)));
+  const bent = Math.asin(Math.min(1, Math.sin(zenith) / WATER_IOR));
+  const flat = Math.hypot(dir.x, dir.z) > 1e-6 ? new THREE.Vector3(dir.x, 0, dir.z).normalize() : new THREE.Vector3(1, 0, 0);
+  return out.copy(flat).multiplyScalar(Math.sin(bent)).setY(Math.cos(bent)).normalize();
+};
+const _moon = new THREE.Vector3();
+export function placeSun(hour, year) {
+  const e = Math.sin((Math.PI * (hour - 6)) / 12);
+  const noon = (27 + 23.44 * Math.sin(2 * Math.PI * (year - 0.22))) * DEG;
+  const azimuth = Math.PI / 2 + ((hour - 6) / 12) * Math.PI;
+  sun.altitude = e >= 0 ? noon * e : e * 20 * DEG;
+  toward(sun.altitude, azimuth, sun.disk);
+  // The light itself never quite from the horizon (a sun that low is behind the trees
+  // anyway), and at night from the moon, high in the south-west to north-east.
+  toward(Math.max(sun.altitude, 4 * DEG), azimuth, sun.direction);
+  toward(28 * DEG, azimuth + Math.PI, _moon);
+  const moon = 1 - Math.min(1, Math.max(0, (e + 0.12) / 0.16));
+  sun.direction.lerp(_moon, moon * moon * (3 - 2 * moon)).normalize();
+  refract(sun.direction, river.lightDirection.value);
+}
 
 // The flow's strength, a multiple of the design flow: pressure waves travelling down the
 // run and smaller eddies, so no two strands move in lockstep.
@@ -81,6 +114,10 @@ export const river = {
   waterStep: uniform(new THREE.Vector4(0, 0, 1, 0)),
   // Where the light comes from under water (refracted): a uniform, so the sun can move.
   lightDirection: uniform(LIGHT_DIRECTION.clone()),
+  // How fast the water takes each colour out of the light on its way down, per unit (a
+  // tenth of a metre): clear water loses red first; peat-brown water, its dissolved humus
+  // taking the blue, turns the light amber. Set from the river's look where the fish is.
+  absorb: uniform(new THREE.Vector3(0.03, 0.0085, 0.013)),
 };
 
 // Tileable fractal value noise for the crowns, made once.
@@ -215,7 +252,11 @@ export const causticLight = Fn(([p]) => {
   const ring = rippleField(q);
   const uv = q.add(ring.xy).div(params.x);
   const blur = abs(depth.sub(params.z)).mul(0.22).add(0.4);
-  const net = texture(river.causticMap.value, uv).level(blur).r;
+  // The tile is small (sixty centimetres): a second look at it, turned and a little larger,
+  // blended in keeps the repeat from showing; the blend's contrast is restored.
+  const uv2 = vec2(uv.x.mul(0.83).sub(uv.y.mul(0.56)), uv.x.mul(0.56).add(uv.y.mul(0.83))).mul(0.71).add(0.37);
+  const map = river.causticMap.value;
+  const net = texture(map, uv).level(blur).r.add(texture(map, uv2).level(blur).r).mul(0.5).sub(1).mul(1.41).add(1).max(0);
   const formed = smoothstep(0.3, 4.5, depth).mul(params.y).mul(params.w);
   const dimples = striderShade(q, depth);
   return max(0, mix(1, net, formed).mul(ring.z.mul(1.5).mul(formed).add(1))).mul(mix(1, dimples, params.y));
@@ -238,7 +279,7 @@ export const canopyOpen = Fn(([q, depth]) => {
 export const waterLight = Fn(([p]) => {
   const depth = max(surfaceLevelAt(p).sub(p.y), 0);
   const open = canopyOpen(surfacePoint(p), depth);
-  const absorption = exp(vec3(0.03, 0.0085, 0.013).mul(depth.div(river.lightDirection.y)).negate());
+  const absorption = exp(river.absorb.mul(depth.div(river.lightDirection.y)).negate());
   const light = mix(river.canopyParams.y, 1, open).mul(mix(1, causticLight(p), open));
   return absorption.mul(light);
 });
@@ -248,8 +289,22 @@ export const waterLight = Fn(([p]) => {
 // light ({ lightDirection, lightColor, reflectedLight }, the light already through the water);
 // `beforeIndirect` and `afterIndirect` see the lighting context ({ radiance, irradiance,
 // iblIrradiance, reflectedLight }) around the ambient and mirrored light.
-export function waterLit(material, { perLight = null, beforeIndirect = null, afterIndirect = null } = {}) {
+const EXPERIMENT = new URLSearchParams(globalThis.location?.search ?? "");
+export function waterLit(material, { perLight = null, beforeIndirect = null, afterIndirect = null, mirror = EXPERIMENT.has("nomirror") ? 0 : 0.5 } = {}) {
   const base = material.setupLightingModel.bind(material);
+  // The sky's light too is taken down by the water, the deeper the more (it comes down at
+  // all angles, a little further than straight); and under water every wet surface
+  // mirrors the water round it, bright toward the surface, dark toward the bed.
+  const own = (context) => {
+    const depth = max(surfaceLevelAt(positionWorld).sub(positionWorld.y), 0);
+    context.irradiance.mulAssign(exp(river.absorb.mul(depth.mul(1.25)).negate()));
+    if (mirror > 0) {
+      const reflectView = reflect(positionViewDirection.negate(), normalView);
+      const reflectWorld = normalize(cameraViewMatrix.transpose().mul(vec4(reflectView, 0)).xyz);
+      const under = depth.greaterThan(0).select(1, 0);
+      context.radiance.addAssign(underwaterInscatter(reflectWorld).mul(mirror).mul(under));
+    }
+  };
   material.setupLightingModel = (builder) => {
     const model = base(builder);
     const direct = model.direct.bind(model);
@@ -259,14 +314,13 @@ export function waterLit(material, { perLight = null, beforeIndirect = null, aft
       direct(lit, builder);
       if (perLight) perLight(lit, builder);
     };
-    if (beforeIndirect || afterIndirect) {
-      const indirect = model.indirect.bind(model);
-      model.indirect = (builder) => {
-        if (beforeIndirect) beforeIndirect(builder.context, builder);
-        indirect(builder);
-        if (afterIndirect) afterIndirect(builder.context, builder);
-      };
-    }
+    const indirect = model.indirect.bind(model);
+    model.indirect = (builder) => {
+      own(builder.context);
+      if (beforeIndirect) beforeIndirect(builder.context, builder);
+      indirect(builder);
+      if (afterIndirect) afterIndirect(builder.context, builder);
+    };
     return model;
   };
   return material;

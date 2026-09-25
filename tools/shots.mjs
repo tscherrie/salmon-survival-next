@@ -56,6 +56,7 @@ if (only) query.set("only", only);
 if (args.includes("--webgl")) query.set("webgl", "");
 if (args.includes("--stages")) query.set("stages", "");
 if (args.includes("--smoke")) query.set("smoke", "");
+for (const flag of ["fixsun", "nomirror", "noamb"]) if (args.includes(`--${flag}`)) query.set(flag, "");
 if (option("quality")) query.set("q", option("quality"));
 if (option("probe")) query.set("probe", option("probe"));
 const url = `http://localhost:${port}/?${query}`;

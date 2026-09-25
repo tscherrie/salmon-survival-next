@@ -27,6 +27,14 @@ const TRAINS = [
 export const TILE = 6;
 const SURFACE_DRIFT = 0.8;
 export const SURFACE_FLOW = new THREE.Vector2(FLOW_DIRECTION.x * SURFACE_DRIFT, FLOW_DIRECTION.z * SURFACE_DRIFT);
+// How far the surface has slid downstream so far: carried along the river's own direction
+// where the eye is, a step each frame (so a bend turns the drift without a jump).
+export const surfaceDrift = uniform(new THREE.Vector2());
+export function driftSurface(dt, flowX, flowZ) {
+  const length = Math.hypot(flowX, flowZ) || 1;
+  surfaceDrift.value.x += (flowX / length) * SURFACE_DRIFT * dt;
+  surfaceDrift.value.y += (flowZ / length) * SURFACE_DRIFT * dt;
+}
 
 const WAVES = (() => {
   let seed = 0.37;
@@ -48,7 +56,7 @@ const WAVES = (() => {
 // surface itself and the mirror in post.js, so the ripples one sees are the ones that make
 // the light. (Unrolled: fourteen trains, each a few multiply-adds.)
 export const surfaceWaves = Fn(([q, t, roughness]) => {
-  const moved = q.sub(vec2(SURFACE_FLOW.x, SURFACE_FLOW.y).mul(t));
+  const moved = q.sub(surfaceDrift);
   let slope = vec2(0);
   let height = float(0);
   for (const w of WAVES) {

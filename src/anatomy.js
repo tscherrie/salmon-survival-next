@@ -1430,6 +1430,8 @@ function shadeFish(materials, body, membranes) {
   // Light through the skin: a young fish and a fin pass the light that falls on their far
   // side, and the sky's light from all round shows through them.
   const lighting = {
+    // (The fish mirror the water in their own way, below.)
+    mirror: 0,
     perLight: ({ lightDirection, lightColor, reflectedLight }) => {
       const enter = max(0, dot(normalView, lightDirection).negate());
       const through = normalize(lightDirection.add(normalView.mul(0.22)));
