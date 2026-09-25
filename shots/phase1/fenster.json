@@ -1,6 +1,6 @@
 {
-  "name": "meer",
-  "set": "p1b",
+  "name": "fenster",
+  "set": "p1c",
   "renderer": "webgpu",
   "three": "186",
   "gpuName": "unknown",
@@ -14,21 +14,21 @@
     1
   ],
   "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
-  "when": "2026-09-25T18:48:17.157Z",
+  "when": "2026-09-25T19:00:35.718Z",
   "gpu": {
-    "median": 98.96,
-    "p90": 151.19,
+    "median": 72.29,
+    "p90": 76.35,
     "n": 80
   },
   "cpu": {
-    "median": 2.8,
-    "p90": 3.1,
+    "median": 3.5,
+    "p90": 3.8,
     "n": 80
   },
-  "calls": 86,
-  "triangles": 2252443,
-  "programs": 110,
-  "textures": 39,
-  "geometries": 221,
-  "frame": 13.74
+  "calls": 178,
+  "triangles": 2885592,
+  "programs": 158,
+  "textures": 40,
+  "geometries": 293,
+  "frame": 7.95
 }

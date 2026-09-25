@@ -19,7 +19,7 @@ const option = (name) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : null;
 };
-const set = args.find((a, i) => !a.startsWith("--") && !args[i - 1]?.match(/^--(only|port|quality|probe)$/));
+const set = args.find((a, i) => !a.startsWith("--") && !args[i - 1]?.match(/^--(only|port|quality|probe|render)$/));
 if (!set) {
   console.error("usage: node tools/shots.mjs <set> [--only a,b] [--port 8123] [--headed] [--webgl]");
   process.exit(1);
@@ -59,6 +59,7 @@ if (args.includes("--smoke")) query.set("smoke", "");
 for (const flag of ["fixsun", "nomirror", "noamb"]) if (args.includes(`--${flag}`)) query.set(flag, "");
 if (option("quality")) query.set("q", option("quality"));
 if (option("probe")) query.set("probe", option("probe"));
+if (option("render")) query.set("render", option("render"));
 const url = `http://localhost:${port}/?${query}`;
 const chrome = spawn(
   CHROME,

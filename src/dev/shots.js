@@ -55,6 +55,7 @@ export function shotURL(set, shot, extra = "") {
   const here = new URLSearchParams(location.search);
   for (const flag of ["stages", "webgl", "smoke", "fixsun", "nomirror", "noamb"]) if (here.has(flag)) extra += `&${flag}`;
   if (here.get("probe")) extra += `&probe=${here.get("probe")}`;
+  if (here.get("render")) extra += `&render=${here.get("render")}`;
   // (A run at another quality: ?shots=set&q=eco.)
   if (here.get("q")) extra += `&q=${here.get("q")}`;
   const q = new URLSearchParams({ capture: "1", seed: "7", day: "still", rain: "0", quality: new URLSearchParams(location.search).get("q") || "detail", shots: set, shot: shot.name, stage: shot.stage, at: String(shot.at), season: shot.season, hour: String(shot.hour) });
@@ -289,7 +290,7 @@ export async function runShots(salmon, query) {
   const numbers = await measure(salmon);
   numbers.frame = await throughput(salmon);
   if (query.has("stages")) numbers.stages = await stages(salmon);
-  await salmon.capture(`${set}/${shot.name}`, 1600, 900);
+  await salmon.capture(`${set}/${shot.name}`, 1600, 900, { render: Number(query.get("render")) || 1 });
   const report = {
     name: shot.name,
     set,

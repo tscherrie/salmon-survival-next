@@ -1262,8 +1262,12 @@ async function start() {
     settings = gameSettings();
     const size = framebufferSize(bounds.width, bounds.height, settings.resolution * frameRate.scale, 8192, settings.maxPixels * frameRate.scale * frameRate.scale);
     if (!size) return;
-    renderer.setSize(size.width, size.height, false);
-    post.setSize(size.width, size.height, size.scale);
+    // With frames blended in time the picture goes to the screen at the screen's own
+    // resolution (up to 4K), whatever the scene is drawn at: the blend fills in the rest.
+    const screen = settings.taa ? framebufferSize(bounds.width, bounds.height, Math.min(devicePixelRatio || 1, 2), 8192, 8.3e6) : size;
+    const output = screen && screen.width >= size.width ? screen : size;
+    renderer.setSize(output.width, output.height, false);
+    post.setSize(size.width, size.height, size.scale, output.width, output.height);
     camera.aspect = bounds.width / bounds.height;
     camera.updateProjectionMatrix();
     life.setScale(size.height / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)));
@@ -1278,14 +1282,14 @@ async function start() {
   // in the lower river) blue first, so the light turns amber; the sea's clear water blue
   // last. `extinction`: the same for the view, relative to green (the fog's density).
   const LOOKS = {
-    brook: { fog: [0.05, 0.145, 0.14], density: 0.017, canopy: 0.42, focal: 4, body: [0.02, 0.06, 0.05], tint: [0.95, 0.97, 0.98], absorb: [0.034, 0.0085, 0.012], extinction: [1.6, 1.0, 1.1] },
-    upper: { fog: [0.052, 0.145, 0.135], density: 0.018, canopy: 0.28, focal: 7, body: [0.02, 0.06, 0.05], tint: [0.95, 0.96, 0.95], absorb: [0.034, 0.01, 0.017], extinction: [1.55, 1.0, 1.2] },
-    middle: { fog: [0.07, 0.15, 0.115], density: 0.021, canopy: 0.14, focal: 9, body: [0.03, 0.05, 0.035], tint: [0.98, 0.96, 0.9], absorb: [0.036, 0.016, 0.04], extinction: [1.4, 1.0, 1.45] },
-    lower: { fog: [0.1, 0.14, 0.08], density: 0.026, canopy: 0.05, focal: 11, body: [0.04, 0.04, 0.02], tint: [1.0, 0.94, 0.82], absorb: [0.042, 0.028, 0.095], extinction: [1.15, 1.0, 1.9] },
-    estuary: { fog: [0.07, 0.15, 0.13], density: 0.028, canopy: 0, focal: 12, body: [0.03, 0.06, 0.05], tint: [0.95, 0.95, 0.92], absorb: [0.04, 0.014, 0.028], extinction: [1.4, 1.0, 1.3] },
-    sea: { fog: [0.035, 0.18, 0.24], density: 0.011, canopy: 0, focal: 14, body: [0.01, 0.05, 0.08], tint: [0.95, 0.98, 1.0], absorb: [0.045, 0.008, 0.006], extinction: [2.1, 1.0, 0.85] },
+    brook: { fog: [0.05, 0.145, 0.14], density: 0.017, canopy: 0.42, focal: 4, body: [0.02, 0.06, 0.05], tint: [0.95, 0.97, 0.98], absorb: [0.034, 0.0085, 0.012], extinction: [1.6, 1.0, 1.1] , grade: [[0.93, 1.03, 1.03], [0.99, 1.02, 0.98], 1.1] },
+    upper: { fog: [0.052, 0.145, 0.135], density: 0.018, canopy: 0.28, focal: 7, body: [0.02, 0.06, 0.05], tint: [0.95, 0.96, 0.95], absorb: [0.034, 0.01, 0.017], extinction: [1.55, 1.0, 1.2] , grade: [[0.93, 1.03, 1.04], [1.0, 1.01, 0.99], 1.08] },
+    middle: { fog: [0.07, 0.15, 0.115], density: 0.021, canopy: 0.14, focal: 9, body: [0.03, 0.05, 0.035], tint: [0.98, 0.96, 0.9], absorb: [0.036, 0.016, 0.04], extinction: [1.4, 1.0, 1.45] , grade: [[0.97, 1.02, 1.0], [1.02, 1.0, 0.96], 1.06] },
+    lower: { fog: [0.1, 0.14, 0.08], density: 0.026, canopy: 0.05, focal: 11, body: [0.04, 0.04, 0.02], tint: [1.0, 0.94, 0.82], absorb: [0.042, 0.028, 0.095], extinction: [1.15, 1.0, 1.9] , grade: [[1.05, 1.0, 0.9], [1.06, 1.0, 0.88], 1.04] },
+    estuary: { fog: [0.07, 0.15, 0.13], density: 0.028, canopy: 0, focal: 12, body: [0.03, 0.06, 0.05], tint: [0.95, 0.95, 0.92], absorb: [0.04, 0.014, 0.028], extinction: [1.4, 1.0, 1.3] , grade: [[0.95, 1.02, 1.02], [1.0, 1.0, 0.98], 1.05] },
+    sea: { fog: [0.035, 0.18, 0.24], density: 0.011, canopy: 0, focal: 14, body: [0.01, 0.05, 0.08], tint: [0.95, 0.98, 1.0], absorb: [0.045, 0.008, 0.006], extinction: [2.1, 1.0, 0.85] , grade: [[0.9, 1.0, 1.08], [0.97, 1.0, 1.03], 1.1] },
   };
-  const lookNow = { fog: new THREE.Color(), density: 0.02, canopy: 0.3, focal: 6, body: new THREE.Color(), tint: new THREE.Color(), absorb: new THREE.Vector3(), extinction: new THREE.Vector3() };
+  const lookNow = { fog: new THREE.Color(), density: 0.02, canopy: 0.3, focal: 6, body: new THREE.Color(), tint: new THREE.Color(), absorb: new THREE.Vector3(), extinction: new THREE.Vector3(), lift: new THREE.Vector3(), gain: new THREE.Vector3(), saturation: 1 };
   const mixV = new THREE.Vector3();
   const weights = {};
   const mix3 = new THREE.Color();
@@ -1297,6 +1301,9 @@ async function start() {
     lookNow.density = lookNow.canopy = lookNow.focal = 0;
     lookNow.absorb.set(0, 0, 0);
     lookNow.extinction.set(0, 0, 0);
+    lookNow.lift.set(0, 0, 0);
+    lookNow.gain.set(0, 0, 0);
+    lookNow.saturation = 0;
     let total = 0;
     for (const [name, w] of Object.entries(weights)) {
       if (w <= 0) continue;
@@ -1308,6 +1315,9 @@ async function start() {
       lookNow.density += l.density * w;
       lookNow.absorb.add(mixV.fromArray(l.absorb).multiplyScalar(w));
       lookNow.extinction.add(mixV.fromArray(l.extinction).multiplyScalar(w));
+      lookNow.lift.add(mixV.fromArray(l.grade[0]).multiplyScalar(w));
+      lookNow.gain.add(mixV.fromArray(l.grade[1]).multiplyScalar(w));
+      lookNow.saturation += l.grade[2] * w;
       lookNow.canopy += l.canopy * w;
       lookNow.focal += l.focal * w;
     }
@@ -1317,6 +1327,9 @@ async function start() {
     lookNow.density /= total;
     lookNow.absorb.multiplyScalar(1 / total);
     lookNow.extinction.multiplyScalar(1 / total);
+    lookNow.lift.multiplyScalar(1 / total);
+    lookNow.gain.multiplyScalar(1 / total);
+    lookNow.saturation /= total;
     lookNow.canopy /= total;
     lookNow.focal /= total;
     // Deeper water is darker and bluer.
@@ -2334,6 +2347,10 @@ async function start() {
     const murk = 0.6 * conditions.flood * riverShare + 1.4 * events.flood * riverShare;
     waterUniforms.absorb.value.copy(lookHere.absorb).multiplyScalar(1 + murk).add(mixV.set(0.004, 0.006, 0.012).multiplyScalar(murk));
     waterExtinction.value.copy(lookHere.extinction);
+    // The picture's grade for the reach (under water; in the air a neutral one).
+    post.composite.lift.value.copy(above ? mixV.set(0.97, 1, 1.02) : lookHere.lift);
+    post.composite.gain.value.copy(above ? mixV.set(1, 1, 1) : lookHere.gain);
+    post.composite.saturation.value = above ? 1.05 : lookHere.saturation;
     // Water, or air for a moment in a leap.
     const light = (0.06 + 0.94 * sunUp + 0.3 * day.golden) * (0.75 + 0.25 * cloud);
     if (above) {
@@ -2585,7 +2602,7 @@ async function start() {
     if (!running) return;
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
     adaptResolution((now - last) / 1000);
-    if (fpsBox && frames % 15 === 0) fpsBox.textContent = `${Math.round(1 / frameRate.average)} fps · ${renderer.domElement.width}×${renderer.domElement.height}`;
+    if (fpsBox && frames % 15 === 0) fpsBox.textContent = `${Math.round(1 / frameRate.average)} fps · ${post.main.width}×${post.main.height} → ${renderer.domElement.width}×${renderer.domElement.height}`;
     last = now;
     advance(dt);
     requestAnimationFrame(tick);
@@ -2699,13 +2716,15 @@ async function start() {
           await new Promise((r) => setTimeout(r, 0));
         }
       },
-      async capture(name, width = 1280, height = 720) {
+      async capture(name, width = 1280, height = 720, { render = 1 } = {}) {
         const bounds = canvas.getBoundingClientRect();
         renderer.setSize(width, height, false);
-        post.setSize(width, height, width / bounds.width);
+        // (render < 1: the scene drawn smaller and resolved up to the picture's size.)
+        post.setSize(Math.round(width * render), Math.round(height * render), (width * render) / bounds.width, width, height);
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
-        for (let i = 0; i < 16; i++) draw(0);
+        // (Enough frames for the temporal blend to settle: more when it has more to fill in.)
+        for (let i = 0; i < (render < 1 ? 64 : 16); i++) draw(0);
         const image = canvas.toDataURL("image/jpeg", 0.9);
         resize();
         await fetch(`/__capture/${name}`, { method: "POST", body: image });

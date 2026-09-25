@@ -225,7 +225,7 @@ export function createPost(renderer, camera, settings) {
         c.assign(vec3(0));
       });
       const luma = c.dot(vec3(0.2126, 0.7152, 0.0722));
-      return vec4(min(c.mul(smoothstep(1.1, 3.2, luma)), vec3(24)), 1);
+      return vec4(min(c.mul(smoothstep(0.95, 2.8, luma)), vec3(24)), 1);
     })(),
   );
   const downPass = bloomLevels.slice(0, -1).map((level) => {
@@ -261,7 +261,11 @@ export function createPost(renderer, camera, settings) {
   // The composite: contact shading, the mirror under the surface, the shafts, bloom, grade.
   const composite = {
     reflectionStrength: uniform(0.75),
-    bloomStrength: uniform(0.12),
+    bloomStrength: uniform(0.16),
+    // The reach's own grade: a lift into the shadows, a gain over the lights, saturation.
+    lift: uniform(new THREE.Vector3(0.94, 1.02, 1.04)),
+    gain: uniform(new THREE.Vector3(1, 1, 1)),
+    saturation: uniform(1.08),
     shaftStrength: uniform(1),
     aoRadiusScale: uniform(1),
   };
@@ -338,11 +342,12 @@ export function createPost(renderer, camera, settings) {
       color.addAssign(shaftLight.mul(composite.shaftStrength));
       color.addAssign(texture(bloomLevels[0].texture, p).rgb.mul(composite.bloomStrength));
 
-      // Grade: a touch of lift into the blue-green in the shadows, warmth kept in the
-      // lights, and a slight vignette as a mask's glass gives.
+      // Grade: the reach's own tint lifted into the shadows and laid over the lights, its
+      // saturation, and a slight vignette as a mask's glass gives.
       const luma = color.dot(vec3(0.2126, 0.7152, 0.0722));
-      color.assign(mix(color, color.mul(vec3(0.94, 1.02, 1.04)), smoothstep(0.02, 0.4, luma).oneMinus()));
-      color.assign(mix(vec3(luma), color, 1.08));
+      color.assign(mix(color, color.mul(composite.lift), smoothstep(0.02, 0.4, luma).oneMinus()));
+      color.assign(mix(color, color.mul(composite.gain), smoothstep(0.15, 1.2, luma)));
+      color.assign(mix(vec3(luma), color, composite.saturation));
       const v = p.sub(0.5).mul(vec2(1, 0.8));
       color.mulAssign(v.dot(v).mul(0.35).oneMinus());
       return vec4(max(color, vec3(0)), 1);
@@ -367,8 +372,13 @@ export function createPost(renderer, camera, settings) {
   };
   const JITTER = Array.from({ length: 16 }, (_, i) => [halton(i + 1, 2) - 0.5, halton(i + 1, 3) - 0.5]);
   const unjittered = new THREE.Matrix4();
+  // The history is kept at the size of the screen, the scene drawn smaller (the pixel
+  // budget): each frame's samples fall at a different fraction of a pixel, and over sixteen
+  // frames they fill in the finer grid -- a still picture comes out as sharp as the screen.
   const taa = {
     texel: uniform(new THREE.Vector2()),
+    renderTexel: uniform(new THREE.Vector2()),
+    jitter: uniform(new THREE.Vector2()),
     historyValid: uniform(0),
     feedback: uniform(0.1),
     previousView: uniform(new THREE.Matrix4()),
@@ -406,19 +416,29 @@ export function createPost(renderer, camera, settings) {
     return pass(
       Fn(() => {
         const p = uv();
-        const centre = toYCoCg(compress(texture(hdr.texture, p).rgb)).toVar();
+        // Where this screen pixel's point is in this frame's (shifted, smaller) picture, and
+        // the one sample of this frame nearest to it: its colour as drawn, unblurred, and how
+        // near (in screen pixels) -- a sample right on the pixel counts fully, one half a
+        // scene pixel off hardly, so over the frames each pixel gathers what fell on it.
+        const t = p.add(taa.jitter);
+        const texelPosition = t.div(taa.renderTexel).sub(0.5);
+        const nearestTexel = floor(texelPosition.add(0.5));
+        const sampleUv = nearestTexel.add(0.5).mul(taa.renderTexel);
+        const offset = sampleUv.sub(taa.jitter).sub(p).div(taa.texel);
+        const closeness = exp(offset.dot(offset).mul(-2.2));
+        const centre = toYCoCg(compress(texture(hdr.texture, sampleUv).rgb)).toVar();
         const m1 = centre.toVar(),
           m2 = centre.mul(centre).toVar(),
           low = centre.toVar(),
           high = centre.toVar();
         // The nearest surface in the neighbourhood decides where this pixel came from, so the
         // edge of a fish carries its own motion rather than the background's.
-        const nearest = depthAt(p).toVar();
-        const nearestUv = p.toVar();
+        const nearest = depthAt(t).toVar();
+        const nearestUv = t.toVar();
         for (let y = -1; y <= 1; y++)
           for (let x = -1; x <= 1; x++) {
             if (x === 0 && y === 0) continue;
-            const q = p.add(vec2(x, y).mul(taa.texel));
+            const q = t.add(vec2(x, y).mul(taa.renderTexel));
             const s = toYCoCg(compress(texture(hdr.texture, q).rgb));
             m1.addAssign(s);
             m2.addAssign(s.mul(s));
@@ -435,7 +455,7 @@ export function createPost(renderer, camera, settings) {
         const boxLow = max(low, mean.sub(sigma.mul(1.25)));
         const boxHigh = min(high, mean.add(sigma.mul(1.25)));
         const world = u.cameraWorld.mul(vec4(getViewPosition(nearestUv, nearest, u.projectionInverse), 1));
-        const previousUv = getScreenPosition(taa.previousView.mul(world).xyz, taa.previousProjection).add(p.sub(nearestUv));
+        const previousUv = getScreenPosition(taa.previousView.mul(world).xyz, taa.previousProjection).add(t.sub(nearestUv));
         const inside = previousUv.x.greaterThan(0).and(previousUv.x.lessThan(1)).and(previousUv.y.greaterThan(0)).and(previousUv.y.lessThan(1));
         const result = centre.toVar();
         If(taa.historyValid.greaterThan(0.5).and(inside), () => {
@@ -450,8 +470,8 @@ export function createPost(renderer, camera, settings) {
             past.assign(mean.add(toPast.div(outside)));
           });
           // Faster motion trusts the history less.
-          const motion = length(p.sub(previousUv).div(taa.texel));
-          const blend = mix(taa.feedback, 0.35, clamp(motion.div(12), 0, 1));
+          const motion = length(p.sub(previousUv).div(taa.renderTexel));
+          const blend = mix(taa.feedback.mul(closeness).mul(1.6), 0.35, clamp(motion.div(12), 0, 1));
           result.assign(mix(past, centre, blend));
         });
         const resolved = max(fromYCoCg(result), vec3(0)).toVar();
@@ -469,6 +489,7 @@ export function createPost(renderer, camera, settings) {
   const present = {
     exposure: uniform(1),
     sharpen: uniform(0.16),
+    fringe: uniform(0.006),
     grain: uniform(1.5 / 255),
   };
   const expand = (c) => c.div(max(max(c.x, max(c.y, c.z)).oneMinus(), 1e-3));
@@ -478,7 +499,11 @@ export function createPost(renderer, camera, settings) {
         const p = uv();
         let color;
         if (temporal) {
-          const c = texture(source, p).rgb;
+          // As through the flat port of an underwater housing: the colours part a little
+          // toward the edges of the picture.
+          const fromCentre = p.sub(0.5);
+          const part = fromCentre.mul(fromCentre.dot(fromCentre).mul(present.fringe));
+          const c = vec3(texture(source, p.add(part)).r, texture(source, p).g, texture(source, p.sub(part)).b);
           const n = texture(source, p.add(vec2(0, taa.texel.y))).rgb;
           const s = texture(source, p.sub(vec2(0, taa.texel.y))).rgb;
           const e = texture(source, p.add(vec2(taa.texel.x, 0))).rgb;
@@ -505,6 +530,9 @@ export function createPost(renderer, camera, settings) {
     jitterIndex = (jitterIndex + 1) % JITTER.length;
     camera.projectionMatrix.elements[8] += (2 * jx) / main.width;
     camera.projectionMatrix.elements[9] += (2 * jy) / main.height;
+    // (The same shift in the picture's own coordinates, y down. The matrix's third column is
+    // divided by the negative depth, so the picture moves the other way.)
+    taa.jitter.value.set(-jx / main.width, jy / main.height);
     camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
   }
   // Forget the history: after a resize or a jump of the camera.
@@ -512,7 +540,8 @@ export function createPost(renderer, camera, settings) {
     historyValid = false;
   }
 
-  function setSize(width, height, scale) {
+  // The scene at width x height; the screen (and the history) at outputWidth x outputHeight.
+  function setSize(width, height, scale, outputWidth = width, outputHeight = height) {
     main.setSize(width, height);
     const hw = Math.max(1, Math.round(width / 2)),
       hh = Math.max(1, Math.round(height / 2));
@@ -526,9 +555,10 @@ export function createPost(renderer, camera, settings) {
       h = Math.round(h / 2);
     }
     hdr.setSize(width, height);
-    for (const h of history) h.setSize(width, height);
+    for (const h of history) h.setSize(outputWidth, outputHeight);
     historyValid = false;
-    taa.texel.value.set(1 / width, 1 / height);
+    taa.texel.value.set(1 / outputWidth, 1 / outputHeight);
+    taa.renderTexel.value.set(1 / width, 1 / height);
     u.size.value.set(width, height);
     u.shaftSize.value.set(hw, hh);
     composite.aoRadiusScale.value = scale / settings.referenceResolution;

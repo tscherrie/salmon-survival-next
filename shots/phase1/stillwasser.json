@@ -1,6 +1,6 @@
 {
-  "name": "brutbecken",
-  "set": "p1b",
+  "name": "stillwasser",
+  "set": "p1c",
   "renderer": "webgpu",
   "three": "186",
   "gpuName": "unknown",
@@ -14,21 +14,21 @@
     1
   ],
   "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
-  "when": "2026-09-25T18:47:42.516Z",
+  "when": "2026-09-25T19:01:09.510Z",
   "gpu": {
-    "median": 142.67,
-    "p90": 200.61,
+    "median": 108.86,
+    "p90": 117.37,
     "n": 80
   },
   "cpu": {
-    "median": 4.1,
+    "median": 4.2,
     "p90": 4.8,
     "n": 80
   },
-  "calls": 198,
-  "triangles": 3247902,
-  "programs": 157,
+  "calls": 223,
+  "triangles": 3642872,
+  "programs": 203,
   "textures": 40,
-  "geometries": 330,
-  "frame": 13.15
+  "geometries": 403,
+  "frame": 10.39
 }

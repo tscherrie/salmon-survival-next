@@ -1,6 +1,6 @@
 {
-  "name": "quelle",
-  "set": "p1b",
+  "name": "lachsfall",
+  "set": "p1c",
   "renderer": "webgpu",
   "three": "186",
   "gpuName": "unknown",
@@ -14,21 +14,21 @@
     1
   ],
   "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
-  "when": "2026-09-25T18:47:23.520Z",
+  "when": "2026-09-25T19:01:27.296Z",
   "gpu": {
-    "median": 138.15,
-    "p90": 208.47,
+    "median": 128.78,
+    "p90": 134.74,
     "n": 80
   },
   "cpu": {
-    "median": 3.9,
-    "p90": 4.4,
+    "median": 4.6,
+    "p90": 5,
     "n": 80
   },
-  "calls": 158,
-  "triangles": 3284723,
-  "programs": 143,
+  "calls": 309,
+  "triangles": 3070249,
+  "programs": 179,
   "textures": 40,
-  "geometries": 275,
-  "frame": 12.55
+  "geometries": 344,
+  "frame": 11.83
 }
