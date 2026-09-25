@@ -194,6 +194,8 @@ async function start() {
   const windowAt = new THREE.Vector3();
   const waterFog = new THREE.Color();
   let surfaceDrawn = 0;
+  let wasAbove = false,
+    surfacedAt = -1e9;
   const terrain = createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, detail: settings.detail });
   const pebbles = createPebbles(scene);
   // The special places: islands, side brooks, caves ... built as the fish comes near.
@@ -2313,6 +2315,15 @@ async function start() {
     const lv = level(s);
     const above = camera.position.y > lv + 0.02;
     const depth = Math.max(0, lv - camera.position.y);
+    // The eye's glass at the water: half in, half out while it crosses (a leap), and wet
+    // for a moment after it comes up.
+    const glass = Math.max(0.016, 0.05 * fish.length);
+    post.lens.reach.value = Math.abs(camera.position.y - lv) < glass + 0.02 ? glass : 0;
+    post.lens.above.value = above ? 1 : 0;
+    if (above && !wasAbove && frames > 2 && !cameraOverride) surfacedAt = time;
+    wasAbove = above;
+    post.lens.age.value = Math.max(0, time - surfacedAt);
+    post.lens.wet.value = above ? Math.exp(-post.lens.age.value * 1.1) : 0;
     // Seen from above the surface is drawn after what lies under it, for it looks into it;
     // from below before everything, and hides the banks and the forest over it.
     const surfaceOrder = above && settings.clearWater ? 1 : -1;
@@ -2394,6 +2405,8 @@ async function start() {
     // The water's own look (for the surface seen from the air, whatever the eye is in).
     surfaceUniforms.waterColor.value.copy(lookHere.fog).multiplyScalar(light * (1 - 0.45 * iced));
     surfaceUniforms.waterDensity.value = lookHere.density;
+    post.lens.murk.value.copy(surfaceUniforms.waterColor.value);
+    post.lens.air.value.copy(AIR).multiply(skyUniforms.skyLevel.value);
     surfaceUniforms.fogColor.value.copy(scene.fog.color);
     surfaceUniforms.fogDensity.value = scene.fog.density;
     scene.background.copy(scene.fog.color);
@@ -2402,6 +2415,7 @@ async function start() {
     const adapt = above ? 1 : 1 + Math.min(depth, 90) * 0.014;
     const flash = celebration.active ? Math.exp(-celebration.t * 1.4) * (1 - Math.exp(-celebration.t * 12)) : 0;
     renderer.toneMappingExposure = (above ? 0.75 : 1 + 1.1 * (1 - sunUp)) * adapt * (dead > 0 ? 0.6 : 1) * (1 + 0.45 * flash) * (1 + events.flash * (above ? 1.4 : 0.55));
+    post.lens.airGain.value = above ? 1 : 0.75 / ((1 + 1.1 * (1 - sunUp)) * adapt);
     for (const material of mirrored) material.envMapIntensity = 0.6 * (0.08 + 0.92 * sunUp);
     life.light(0.2 + 0.8 * sunUp, sunUp);
     falls.light(0.25 + 0.75 * sunUp);
@@ -2740,6 +2754,10 @@ async function start() {
       // Look from anywhere: view(eye, target) with arrays, or view(null) to follow the fish.
       view(eye, target, near) {
         cameraOverride = eye ? { eye: new THREE.Vector3(...eye), target: new THREE.Vector3(...target), near } : null;
+      },
+      // The eye's glass as if it came up out of the water `seconds` ago.
+      wetLens(seconds) {
+        surfacedAt = time - seconds;
       },
       pause(value) {
         running = !value;

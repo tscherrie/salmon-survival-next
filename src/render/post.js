@@ -25,6 +25,7 @@ import {
   pow,
   reflect,
   screenCoordinate,
+  select,
   sin,
   smoothstep,
   sqrt,
@@ -40,6 +41,7 @@ import {
 import { extinction } from "./fog.js";
 import { surfaceWaves } from "./caustics.js";
 import { canopyOpen, river, surfaceLevelAt, surfacePoint, waterTime } from "./water.js";
+import { windowMap, windowOn } from "./mirror.js";
 
 // Everything that happens after the scene is drawn: the sun's shafts through the water,
 // the mirror of the river in the underside of the surface, bloom, and the final grade.
@@ -493,10 +495,65 @@ export function createPost(renderer, camera, settings) {
     grain: uniform(1.5 / 255),
   };
   const expand = (c) => c.div(max(max(c.x, max(c.y, c.z)).oneMinus(), 1e-3));
+
+  // The eye's glass at the water. Crossing the surface it is half in, half out: a waterline
+  // across the picture, the air above it and the river under it, whichever side the scene
+  // was drawn for (the air from the window's cube, mirror.js; the water as its own murk),
+  // with the dark curve of the meniscus between. And come up out of the water it is wet
+  // for a moment: a film running off it from the top, and drops left behind that dry away.
+  const lens = {
+    // How far out along each ray the glass is, metres; 0 when the eye is nowhere near the
+    // water.
+    reach: uniform(0),
+    // Whether the scene was drawn from the air.
+    above: uniform(1),
+    // The water's murk, for the part of the glass under it when the eye is in the air; the
+    // air's haze, for the part over it when there is no window to show.
+    murk: uniform(new THREE.Color()),
+    air: uniform(new THREE.Color()),
+    // The air is exposed for under the water there: brought down to how it is seen in it.
+    airGain: uniform(1),
+    // 1 just out of the water, drying to 0; and the seconds since.
+    wet: uniform(0),
+    age: uniform(0),
+    aspect: uniform(16 / 9),
+  };
+  // The drops on the glass at p: how they bend the picture (xy) and their dark rims (z).
+  // Two sizes, on two grids a little turned against each other, so they do not stand in
+  // rows.
+  const dropLayer = (p, scale, seed, turn) => {
+    const q = vec2(p.x.mul(lens.aspect), p.y).mul(scale);
+    const r = vec2(q.x.mul(Math.cos(turn)).sub(q.y.mul(Math.sin(turn))), q.x.mul(Math.sin(turn)).add(q.y.mul(Math.cos(turn)))).add(seed);
+    const cell = floor(r);
+    const f = fract(r);
+    const h1 = hash12(cell);
+    const h2 = hash12(cell.add(17.3));
+    const h3 = hash12(cell.add(41.9));
+    // Fewer as the glass dries; the big ones slide a little way down.
+    const shown = step(lens.wet.mul(-0.55).add(1), h1);
+    const radius = h2.mul(h2).mul(0.28).add(0.08);
+    const centre = vec2(h3.mul(0.5).add(0.25), h2.mul(0.3).add(0.25).add(min(lens.age.mul(radius).mul(radius).mul(9), 0.3)));
+    const d = f.sub(centre).div(radius);
+    const r2 = d.dot(d);
+    const inside = smoothstep(1, 0.8, r2).mul(shown);
+    // A drop is a little lens: what is behind it seen shrunk and upside down.
+    const bend = d.mul(sqrt(max(r2.oneMinus(), 0))).mul(radius.mul(-0.9).div(scale)).mul(vec2(float(1).div(lens.aspect), 1));
+    return vec3(bend.mul(inside), smoothstep(0.55, 1, r2).mul(inside));
+  };
+  const drops = (p) => dropLayer(p, 6, 0, 0.3).add(dropLayer(p, 11, 5.7, -0.5));
   const presentMaterial = (source, temporal) =>
     pass(
       Fn(() => {
-        const p = uv();
+        const p = uv().toVar();
+        const rim = float(0).toVar();
+        If(lens.wet.greaterThan(0.01), () => {
+          // The film: water still on the glass below a front running down from the top.
+          const film = smoothstep(lens.age.mul(1.3).sub(0.08), lens.age.mul(1.3), p.y).mul(lens.wet);
+          const sheet = vec2(sin(p.y.mul(47).add(p.x.mul(9)).sub(lens.age.mul(8))), sin(p.x.mul(33).add(lens.age.mul(4)))).mul(0.005);
+          const drop = drops(p);
+          p.addAssign(sheet.mul(film).add(drop.xy.mul(film.mul(-0.6).add(1))));
+          rim.assign(drop.z.mul(lens.wet));
+        });
         let color;
         if (temporal) {
           // As through the flat port of an underwater housing: the colours part a little
@@ -511,6 +568,24 @@ export function createPost(renderer, camera, settings) {
           const sharp = c.add(c.mul(4).sub(n).sub(s).sub(e).sub(w).mul(present.sharpen));
           color = expand(max(clamp(sharp, min(c, min(min(n, s), min(e, w))), max(c, max(max(n, s), max(e, w)))), vec3(0)));
         } else color = texture(source, p).rgb;
+        color = color.toVar();
+        If(lens.reach.greaterThan(0), () => {
+          // (A flat port, `reach` ahead of the eye: the waterline across it is straight.)
+          const dirView = normalize(getViewPosition(p, float(0.5), u.projectionInverse));
+          const dir = normalize(u.cameraWorld.mul(vec4(dirView, 0)).xyz);
+          const glass = u.cameraPos.add(dir.mul(lens.reach.div(max(dirView.z.negate(), 0.1))));
+          const height = glass.y.sub(surfaceLevelAt(glass)).sub(surfaceWaves(glass.xz, waterTime, float(1)).z);
+          If(lens.above.greaterThan(0.5).and(height.lessThan(0)), () => {
+            color.assign(mix(color.mul(0.4), lens.murk, 0.65));
+          });
+          If(lens.above.lessThan(0.5).and(height.greaterThan(0)), () => {
+            color.assign(select(windowOn.greaterThan(0.5), windowMap.sample(dir).rgb, lens.air).mul(lens.airGain));
+          });
+          const x = height.div(0.0035);
+          const meniscus = exp(x.mul(x).negate());
+          color.assign(mix(color, color.mul(0.18), meniscus.mul(0.85)));
+        });
+        color.mulAssign(rim.mul(-0.3).add(1));
         const mapped = sRGBTransferOETF(acesFilmicToneMapping(color, present.exposure));
         const grain = hash12(screenCoordinate.xy.add(fract(waterTime).mul(91))).sub(0.5).mul(present.grain);
         return vec4(mapped.add(grain), 1);
@@ -561,6 +636,7 @@ export function createPost(renderer, camera, settings) {
     taa.renderTexel.value.set(1 / width, 1 / height);
     u.size.value.set(width, height);
     u.shaftSize.value.set(hw, hh);
+    lens.aspect.value = outputWidth / outputHeight;
     composite.aoRadiusScale.value = scale / settings.referenceResolution;
   }
 
@@ -648,5 +724,5 @@ export function createPost(renderer, camera, settings) {
     return list;
   }
 
-  return { main, setSize, render, composite, shaft, jitter, resetHistory, debugPasses };
+  return { main, setSize, render, composite, lens, shaft, jitter, resetHistory, debugPasses };
 }

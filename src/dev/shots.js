@@ -34,6 +34,11 @@ export const SHOTS = [
   { name: "draufsicht", stage: "parr", at: 2500, season: "summer", hour: 13, view: { eye: [-7, 0, 3.2], target: [3, 0, -1.8] } },
   // The rock gorge.
   { name: "schlucht", stage: "parr", at: 7200, season: "summer", hour: 13 },
+  // The eye crossing the surface in a leap: the waterline across the picture, the banks
+  // over it, the river under it.
+  { name: "wasserlinie", stage: "parr", at: 4250, season: "summer", hour: 16, view: { eye: [-4, 0, -0.005], target: [20, 0, 0.6] } },
+  // Just come up out of the water: the glass wet, the film running off it, drops.
+  { name: "nass", stage: "parr", at: 4250, season: "summer", hour: 16, view: { eye: [-6, 0, 0.5], target: [20, 0, 1.5] }, wet: 0.25 },
   // The stone bridge from the water: arches, piers, people on it.
   { name: "bruecke", stage: "smolt", at: 11790, season: "spring", hour: 14, view: { eye: [-26, 0, 1.2], target: [10, 0, 3] } },
   // The lower river: brown peat water, a slow deep reach.
@@ -312,6 +317,7 @@ export async function runShots(salmon, query) {
     await salmon.run(0.05);
     await salmon.settle(20);
   }
+  if (shot.wet !== undefined) salmon.wetLens(shot.wet);
   salmon.pause(true);
   // Measured at the size of the picture, whatever the window: the same pixels every time.
   const bounds = salmon.renderer.domElement.getBoundingClientRect();
