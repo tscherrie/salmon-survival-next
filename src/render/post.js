@@ -94,8 +94,8 @@ export function createPost(renderer, camera, settings) {
 
   // The scene itself: HDR colour and a depth texture. (No multisampling: the temporal
   // resolve smooths the edges, and the see-through leaves are dithered for it to average.)
+  // (The default depth format: the water's surface copies it to look into the water.)
   const depthTexture = new THREE.DepthTexture(1, 1);
-  depthTexture.type = THREE.FloatType;
   const main = new THREE.RenderTarget(1, 1, { type: THREE.HalfFloatType, depthTexture });
   const shafts = target();
   const shaftsSpare = target();

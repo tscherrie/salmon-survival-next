@@ -56,7 +56,7 @@ if (only) query.set("only", only);
 if (args.includes("--webgl")) query.set("webgl", "");
 if (args.includes("--stages")) query.set("stages", "");
 if (args.includes("--smoke")) query.set("smoke", "");
-for (const flag of ["fixsun", "nomirror", "noamb"]) if (args.includes(`--${flag}`)) query.set(flag, "");
+for (const flag of ["fixsun", "nomirror", "noamb", "costs"]) if (args.includes(`--${flag}`)) query.set(flag, "");
 if (option("quality")) query.set("q", option("quality"));
 if (option("probe")) query.set("probe", option("probe"));
 if (option("render")) query.set("render", option("render"));
@@ -102,8 +102,8 @@ while (finished < list.length) {
     lastProgress = Date.now();
     console.log(`${set}: ${finished}/${list.length}`);
   }
-  // A point that takes over two minutes has hung.
-  if (Date.now() - lastProgress > 120000) {
+  // A point that takes over two minutes has hung (ten when every part is being timed).
+  if (Date.now() - lastProgress > (args.includes("--costs") ? 600000 : 120000)) {
     console.error(`stuck after ${finished} of ${list.length}`);
     break;
   }

@@ -13,6 +13,7 @@ import { framebufferSize, qualityName } from "../../shared/render-policy.js";
 import { reportSceneError } from "../../shared/controls.js";
 import { COURSE_VERSION, FALLS, MOUTH, REDD, S, TRIBUTARIES, bed, coolingAt, frame, gusts, level, locate, passSlot, place, poolAt, regionName, regionWeights, relaid, section, setSeasonFlow, driftRich } from "./course.js";
 import { createFlowField } from "./flowfield.js";
+import { createMirror } from "./render/mirror.js";
 import { createBedMaterial, createRockMaterials, createSky, photoTextures, photosLoaded, createSurfaceMaterial,skyUniforms, surfaceUniforms } from "./materials.js";
 import { createTerrain } from "./terrain.js";
 import { treeUniforms } from "./forest.js";
@@ -187,7 +188,9 @@ async function start() {
   mark("setup");
   const [bedMaterial, rocks] = await Promise.all([createBedMaterial(), createRockMaterials()]);
   mark("textures");
-  const surfaceMaterial = createSurfaceMaterial();
+  const surfaceMaterial = createSurfaceMaterial({ clear: settings.clearWater });
+  const waterMirror = settings.clearWater ? createMirror(renderer, { scale: 0.5 }) : null;
+  let surfaceDrawn = 0;
   const terrain = createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, detail: settings.detail });
   const pebbles = createPebbles(scene);
   // The special places: islands, side brooks, caves ... built as the fish comes near.
@@ -2307,6 +2310,15 @@ async function start() {
     const lv = level(s);
     const above = camera.position.y > lv + 0.02;
     const depth = Math.max(0, lv - camera.position.y);
+    // Seen from above the surface is drawn after what lies under it, for it looks into it;
+    // from below before everything, and hides the banks and the forest over it.
+    const surfaceOrder = above && settings.clearWater ? 1 : -1;
+    if (surfaceOrder !== surfaceDrawn) {
+      surfaceDrawn = surfaceOrder;
+      scene.traverse((object) => {
+        if (object.material === surfaceMaterial) object.renderOrder = surfaceOrder;
+      });
+    }
     const lookHere = regionLook(fish.river.s, lv - bed(fish.river.s, fish.river.u));
     keyColor.copy(SUN_COLOR).lerp(DUSK_COLOR, day.golden * 0.85).lerp(MOON_COLOR, 1 - sunUp);
     key.color.copy(keyColor);
@@ -2376,6 +2388,9 @@ async function start() {
       // Ice mirrors nothing.
       post.composite.reflectionStrength.value = 0.75 * (1 - iced);
     }
+    // The water's own look (for the surface seen from the air, whatever the eye is in).
+    surfaceUniforms.waterColor.value.copy(lookHere.fog).multiplyScalar(light * (1 - 0.45 * iced));
+    surfaceUniforms.waterDensity.value = lookHere.density;
     surfaceUniforms.fogColor.value.copy(scene.fog.color);
     surfaceUniforms.fogDensity.value = scene.fog.density;
     scene.background.copy(scene.fog.color);
@@ -2481,9 +2496,17 @@ async function start() {
     camera.updateMatrixWorld();
     post.jitter();
     if (settings.taa) shadowFrame(key, shadowRadius, frames);
+    // Above the water the world it mirrors, first (the sun's shadow map is drawn for it and
+    // not again for the eye: the light's frame is the same).
+    if (waterMirror && above) {
+      waterMirror.setSize(post.main.width, post.main.height);
+      waterMirror.render(scene, camera, lv, surfaceMaterial);
+      key.shadow.autoUpdate = false;
+    } else waterMirror?.off();
     renderer.setRenderTarget(post.main);
     prof.mark("draw-prep");
     renderer.render(scene, camera);
+    key.shadow.autoUpdate = true;
     if (prof.on) {
       prof.calls = renderer.info.render.calls;
       prof.tris = renderer.info.render.triangles;
@@ -2529,6 +2552,13 @@ async function start() {
     renderer.setRenderTarget(post.main);
     renderer.shadowMap.needsUpdate = true;
     renderer.render(scene, camera);
+    // (And into the mirror, whose target is another: else the first look from the air
+    // would stall while those are built.)
+    if (waterMirror) {
+      waterMirror.setSize(post.main.width, post.main.height);
+      waterMirror.render(scene, camera, camera.position.y - 1, surfaceMaterial);
+      waterMirror.off();
+    }
     mark("compiled");
     await photosLoaded();
     mark("photos");

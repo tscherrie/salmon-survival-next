@@ -8,6 +8,8 @@ import {
   attribute,
   cameraPosition,
   cameraProjectionMatrix,
+  cameraFar,
+  cameraNear,
   cameraViewMatrix,
   cos,
   cross,
@@ -30,8 +32,11 @@ import {
   modelWorldMatrix,
   normalGeometry,
   normalize,
+  perspectiveDepthToViewZ,
   positionLocal,
+  positionView,
   positionWorld,
+  screenUV,
   pow,
   property,
   reflect,
@@ -49,10 +54,13 @@ import {
   vec3,
   vec4,
   vertexColor,
+  viewportDepthTexture,
+  viewportSharedTexture,
 } from "three/tsl";
 import { RIPPLE_COUNT, RIPPLE_SPEED, SUN_DIRECTION, river, waterLit, waterTime } from "./render/water.js";
 import { surfaceWaves } from "./render/caustics.js";
-import { fogNodes, underwaterInscatter, waterBetween } from "./render/fog.js";
+import { extinction, fogNodes, underwaterInscatter, waterBetween } from "./render/fog.js";
+import { mirrorMap, mirrorOn } from "./render/mirror.js";
 import { eddyAt } from "./flowfield.js";
 
 // The materials the river is made of: its bed (gravel, sand, silt and rock, with the film
@@ -144,7 +152,9 @@ export function createSky(scene) {
   })();
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(400, 32, 16), material);
   mesh.frustumCulled = false;
-  mesh.renderOrder = -10;
+  // After everything solid, so only the sky one sees is shaded, and before the surface,
+  // which from above may look back at it (main.js).
+  mesh.renderOrder = 0.5;
   mesh.name = "Sky";
   scene.add(mesh);
   return mesh;
@@ -395,6 +405,9 @@ export const surfaceUniforms = {
   body: uniform(new THREE.Color(0.02, 0.06, 0.06)),
   // Winter: how much of the river here is frozen over (the riffles stay open longest).
   ice: uniform(0),
+  // The water's own colour and density, for looking into it from the air.
+  waterColor: uniform(new THREE.Color(0.05, 0.14, 0.14)),
+  waterDensity: uniform(0.02),
   // (Kept for main.js, which sets them each frame: the water's own fog now comes from the
   // scene's fog directly.)
   fogColor: { value: new THREE.Color() },
@@ -447,7 +460,10 @@ const rainSlope = Fn(([q, t, rain]) => {
   return slope.mul(0.14);
 });
 
-export function createSurfaceMaterial() {
+// clear: from above one sees into the water (the bed, the stones, the fish, as drawn before
+// the surface: main.js orders it after them then, and before them from below, where it
+// hides the banks and the forest over it). Without, the water from above is its own colour.
+export function createSurfaceMaterial({ clear = true } = {}) {
   const material = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide, fog: false });
   const U = surfaceUniforms;
   const foamAttribute = attribute("foam", "float");
@@ -557,14 +573,50 @@ export function createSurfaceMaterial() {
       const away = length(world.sub(cameraPosition));
       color.assign(mix(color, underwaterInscatter(incident), smoothstep(22, 90, away).mul(0.7)));
     }).Else(() => {
-      // From above.
+      // From above: into the water -- the bed, the stones and the fish, bent by the waves
+      // and coloured by as much water as the light goes through to them and back -- and the
+      // sky mirrored over it, more the flatter one looks.
       const normal = normalize(vec3(slope.x.negate(), 1, slope.y.negate()));
       const mirrored = reflect(incident, normal).toVar();
       mirrored.y.assign(abs(mirrored.y));
       const cosi = dot(incident, normal).negate().clamp(0, 1);
       const fresnel = pow(cosi.oneMinus(), 5).mul(0.98).add(0.02);
-      const sky = skyColor(mirrored, waterTime);
-      const into = U.body.mul(daylit.mul(0.6).add(0.4)).mul(U.sun.mul(0.4).add(1));
+      // What it mirrors: the world above the water, from the mirror drawn this frame
+      // (mirror.js) where the reflected ray, bent by the waves, leads into it -- found by
+      // taking the ray some way out, mirroring that point in the water and seeing where
+      // it lies on the screen -- or else the sky.
+      // (The waves' tilt only in part: a single distance for everything mirrored would
+      // magnify it into rings where the waves turn.)
+      const sky = vec3().toVar();
+      const gentle = reflect(incident, normalize(vec3(slope.x.mul(-0.4), 1, slope.y.mul(-0.4))));
+      const out = world.add(gentle.mul(24));
+      const image = cameraProjectionMatrix.mul(cameraViewMatrix).mul(vec4(out.x, world.y.mul(2).sub(out.y), out.z, 1));
+      // (Past the mirror's edge, its edge: what lies just beyond is much like it.)
+      const at = image.xy.div(image.w).mul(vec2(-0.5, -0.5)).add(0.5).clamp(0.002, 0.998);
+      If(mirrorOn.greaterThan(0.5).and(image.w.greaterThan(0)), () => {
+        sky.assign(mirrorMap.sample(at).rgb);
+      }).Else(() => {
+        sky.assign(skyColor(mirrored, waterTime));
+      });
+      let into;
+      if (clear) {
+        // How much water lies behind this point along the view, from the depth of what
+        // was drawn before the surface. (One copy of the depth a frame: every lookup
+        // samples the same node.)
+        const surfaceZ = positionView.z;
+        const depth = viewportDepthTexture();
+        const behindZ = (uvAt) => perspectiveDepthToViewZ(depth.sample(uvAt), cameraNear, cameraFar);
+        const straight = max(surfaceZ.sub(behindZ(screenUV)), 0);
+        // Bent by the waves, the more water the more (and never onto something in front).
+        const bentUV = screenUV.add(slope.mul(vec2(0.06, -0.06)).mul(straight.mul(0.4).clamp(0, 1)));
+        const lookUV = select(behindZ(bentUV).lessThan(surfaceZ), bentUV, screenUV);
+        const path = max(surfaceZ.sub(behindZ(lookUV)), 0).mul(length(positionView).div(surfaceZ.negate().max(1e-3)));
+        const transmit = exp(U.waterDensity.mul(path).mul(extinction).negate());
+        const inscatter = U.waterColor.mul(daylit.mul(0.6).add(0.4));
+        into = viewportSharedTexture(lookUV).rgb.mul(transmit).add(inscatter.mul(transmit.oneMinus()));
+      } else {
+        into = U.body.mul(daylit.mul(0.6).add(0.4)).mul(U.sun.mul(0.4).add(1));
+      }
       color.assign(mix(into, sky, fresnel));
       color.assign(mix(color, vec3(2.2, 2.25, 2.25).mul(daylit.mul(0.8).add(0.2)), foam.mul(0.92)));
       // Snow on the ice.

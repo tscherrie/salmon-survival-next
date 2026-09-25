@@ -29,6 +29,9 @@ export const SHOTS = [
   { name: "lachsfall", stage: "spawner", at: 5150, season: "autumn", hour: 12 },
   // Above the water at the salmon fall: the surface from above, the banks, the sky.
   { name: "sprung", stage: "spawner", at: 5150, season: "autumn", hour: 12, view: { eye: [-12, 0, 1.4], target: [30, 0, 4] } },
+  // Looking down into the brook from just above it: the bed through the water, the banks
+  // mirrored.
+  { name: "draufsicht", stage: "parr", at: 2500, season: "summer", hour: 13, view: { eye: [-7, 0, 3.2], target: [3, 0, -1.8] } },
   // The rock gorge.
   { name: "schlucht", stage: "parr", at: 7200, season: "summer", hour: 13 },
   // The stone bridge from the water: arches, piers, people on it.
@@ -53,7 +56,7 @@ const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve))
 // The address of one point: the game with its settings, the run's name, the point's name.
 export function shotURL(set, shot, extra = "") {
   const here = new URLSearchParams(location.search);
-  for (const flag of ["stages", "webgl", "smoke", "fixsun", "nomirror", "noamb"]) if (here.has(flag)) extra += `&${flag}`;
+  for (const flag of ["stages", "webgl", "smoke", "fixsun", "nomirror", "noamb", "costs"]) if (here.has(flag)) extra += `&${flag}`;
   if (here.get("probe")) extra += `&probe=${here.get("probe")}`;
   if (here.get("render")) extra += `&render=${here.get("render")}`;
   // (A run at another quality: ?shots=set&q=eco.)
@@ -207,6 +210,26 @@ async function stages(salmon, n = 30) {
   return out;
 }
 
+// What each part of the scene costs: the frame timed with each visible mesh group hidden in
+// turn (grouped by name), largest first. (?costs; slow, for finding where the time goes.)
+async function costs(salmon) {
+  const groups = new Map();
+  salmon.scene.traverse((object) => {
+    if (!object.visible || !(object.isMesh || object.isSprite || object.isPoints)) return;
+    const name = object.name || object.parent?.name || object.material?.type || "?";
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(object);
+  });
+  const whole = await throughput(salmon, 20);
+  const out = { whole };
+  for (const [name, objects] of groups) {
+    for (const object of objects) object.visible = false;
+    out[name] = +(whole - (await throughput(salmon, 20))).toFixed(2);
+    for (const object of objects) object.visible = true;
+  }
+  return Object.fromEntries(Object.entries(out).sort((a, b) => b[1] - a[1]));
+}
+
 // Which graphics card drew it (a software renderer would make the timings meaningless).
 function gpuName(renderer) {
   const info = renderer.backend?.adapter?.info;
@@ -290,6 +313,7 @@ export async function runShots(salmon, query) {
   const numbers = await measure(salmon);
   numbers.frame = await throughput(salmon);
   if (query.has("stages")) numbers.stages = await stages(salmon);
+  if (query.has("costs")) numbers.costs = await costs(salmon);
   await salmon.capture(`${set}/${shot.name}`, 1600, 900, { render: Number(query.get("render")) || 1 });
   const report = {
     name: shot.name,
