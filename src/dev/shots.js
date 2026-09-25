@@ -54,6 +54,7 @@ const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve))
 export function shotURL(set, shot, extra = "") {
   const here = new URLSearchParams(location.search);
   for (const flag of ["stages", "webgl", "smoke"]) if (here.has(flag)) extra += `&${flag}`;
+  if (here.get("probe")) extra += `&probe=${here.get("probe")}`;
   // (A run at another quality: ?shots=set&q=eco.)
   if (here.get("q")) extra += `&q=${here.get("q")}`;
   const q = new URLSearchParams({ capture: "1", seed: "7", day: "still", rain: "0", quality: new URLSearchParams(location.search).get("q") || "detail", shots: set, shot: shot.name, stage: shot.stage, at: String(shot.at), season: shot.season, hour: String(shot.hour) });
@@ -270,6 +271,19 @@ export async function runShots(salmon, query) {
     salmon.draw(0);
     await nextFrame();
   }
+  // (?probe=x,y;x,y: what the eye sees at those points of the picture, 0..1 from top left.)
+  if (query.get("probe")) {
+    const { THREE, camera, scene } = salmon;
+    const ray = new THREE.Raycaster();
+    const found = [];
+    for (const point of query.get("probe").split(";")) {
+      const [x, y] = point.split(",").map(Number);
+      ray.setFromCamera(new THREE.Vector2(x * 2 - 1, 1 - y * 2), camera);
+      const hits = ray.intersectObjects(scene.children, true).slice(0, 4);
+      found.push({ at: [x, y], hits: hits.map((h) => ({ name: h.object.name, type: h.object.type, material: h.object.material?.type, distance: +h.distance.toFixed(2), y: +h.point.y.toFixed(2), level: +salmon.course.level(salmon.fish.river.s).toFixed(2) })) });
+    }
+    window.__probe = found;
+  }
   // (?smoke: the game played a little after the picture, to catch what breaks in play.)
   if (query.has("smoke")) await smoke(salmon, shot);
   const numbers = await measure(salmon);
@@ -287,6 +301,7 @@ export async function runShots(salmon, query) {
     agent: navigator.userAgent,
     when: new Date().toISOString(),
     ...numbers,
+    probe: window.__probe,
   };
   clearInterval(logTimer);
   await sendLog();

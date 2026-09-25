@@ -5,6 +5,7 @@ import {
   abs,
   atan,
   attribute,
+  cameraPosition,
   cameraViewMatrix,
   cos,
   dot,
@@ -33,6 +34,7 @@ import {
   vec4,
 } from "three/tsl";
 import { photo } from "./materials.js";
+import { surfaceLevelAt } from "./render/water.js";
 
 // The forest above the banks: Norway spruce, Scots pine and downy birch, and under them
 // juniper, bilberry, ferns, old stumps and fallen trunks.
@@ -592,9 +594,14 @@ export function createTreeMaterial() {
   })();
   const worldNormal = varying(normalize(modelNormalMatrix.mul(normalGeometry)));
   const tone = foliageTone(leaf);
-  // Cut out of the cards: the gaps between needles and leaves, and the birches' leaves as
-  // they fall.
-  material.maskNode = tone.greaterThanEqual(0).and(leaf.z.greaterThan(1.5).and(leaf.z.lessThan(2.5)).and(leaf.w.lessThan(U.treeBare)).not());
+  // Cut out of the cards: the gaps between needles and leaves, the birches' leaves as they
+  // fall, and whatever of a card hangs below the water -- a spruce's lowest sprays sweep
+  // down to the river, and under it a flat card shows only as a black shard.
+  // (Only for an eye under water: the surface is drawn from the level near the eye, and far
+  // off, seen from the air, it would cut the wrong sprays.)
+  const underwaterEye = cameraPosition.y.lessThan(surfaceLevelAt(cameraPosition));
+  const above = positionWorld.y.greaterThan(surfaceLevelAt(positionWorld).add(0.02)).or(leaf.z.lessThan(0.5)).or(underwaterEye.not());
+  material.maskNode = tone.greaterThanEqual(0).and(leaf.z.greaterThan(1.5).and(leaf.z.lessThan(2.5)).and(leaf.w.lessThan(U.treeBare)).not()).and(above);
   material.colorNode = Fn(() => {
     const kind = leaf.z;
     const color = attribute("color", "vec3").toVar();
