@@ -1,0 +1,33 @@
+{
+  "name": "fenster",
+  "set": "r180",
+  "renderer": "webgl2",
+  "three": "180",
+  "gpuName": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)",
+  "size": [
+    1600,
+    900
+  ],
+  "screen": [
+    1600,
+    813,
+    1
+  ],
+  "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+  "when": "2026-09-25T17:25:24.777Z",
+  "gpu": {
+    "median": 14.3,
+    "p90": 14.56,
+    "n": 80
+  },
+  "cpu": {
+    "median": 1.9,
+    "p90": 2.1,
+    "n": 80
+  },
+  "calls": 174,
+  "triangles": 2882583,
+  "programs": 151,
+  "textures": 37,
+  "geometries": 301
+}

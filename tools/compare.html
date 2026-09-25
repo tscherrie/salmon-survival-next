@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fotopunkte vergleichen</title>
+    <!-- Two runs of the photo points (src/dev/shots.js) side by side: a slider over each
+         picture, and what each cost the graphics card. Served by tools/capture-server.mjs:
+         http://localhost:8123/tools/compare.html?a=r180&b=next -->
+    <style>
+      :root { --bg: #0b1417; --fg: #e6f0f0; --dim: #8fa6a8; --line: #1f3236; --good: #6fd08c; --bad: #ff8a7a; }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
+      header { padding: 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      h1 { font-size: 18px; margin: 0 12px 0 0; }
+      select { background: #13232a; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+      main { padding: 16px; display: grid; gap: 28px; max-width: 1640px; margin: 0 auto; }
+      .shot h2 { font-size: 15px; margin: 0 0 6px; }
+      .view { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 8px; background: #000; cursor: ew-resize; user-select: none; }
+      .view img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+      .view .b { clip-path: inset(0 0 0 var(--cut, 50%)); }
+      .view .bar { position: absolute; top: 0; bottom: 0; left: var(--cut, 50%); width: 2px; background: #fff; box-shadow: 0 0 6px #000; }
+      .view .tag { position: absolute; top: 8px; padding: 2px 8px; border-radius: 4px; background: rgba(0, 0, 0, 0.6); font-size: 12px; }
+      .view .tag.a { left: 8px; } .view .tag.b { right: 8px; }
+      table { border-collapse: collapse; margin-top: 6px; font-variant-numeric: tabular-nums; }
+      td, th { padding: 2px 12px 2px 0; text-align: right; color: var(--dim); } th { font-weight: 500; text-align: left; }
+      td.better { color: var(--good); } td.worse { color: var(--bad); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Fotopunkte</h1>
+      <label>links <select id="a"></select></label>
+      <label>rechts <select id="b"></select></label>
+    </header>
+    <main id="list"></main>
+    <script type="module">
+      const params = new URLSearchParams(location.search);
+      const sets = (await (await fetch("/shots/")).json()).filter((n) => !n.startsWith("."));
+      const pick = (id, value) => {
+        const el = document.getElementById(id);
+        el.innerHTML = sets.map((s) => `<option${s === value ? " selected" : ""}>${s}</option>`).join("");
+        el.onchange = () => {
+          params.set(id, el.value);
+          history.replaceState(null, "", `?${params}`);
+          show();
+        };
+      };
+      pick("a", params.get("a") || sets[0]);
+      pick("b", params.get("b") || sets[sets.length - 1]);
+      async function files(set) {
+        try { return await (await fetch(`/shots/${set}/`)).json(); } catch { return []; }
+      }
+      async function numbers(set, name) {
+        try { return await (await fetch(`/shots/${set}/${name}.json`)).json(); } catch { return null; }
+      }
+      const cell = (a, b, key, lowerIsBetter = true, digits = 1) => {
+        if (a == null || b == null) return `<td>${a ?? "–"}</td><td>${b ?? "–"}</td>`;
+        const change = a ? (b - a) / a : 0;
+        const cls = Math.abs(change) < 0.05 ? "" : (change < 0) === lowerIsBetter ? "better" : "worse";
+        const f = (x) => (typeof x === "number" ? x.toLocaleString("de", { maximumFractionDigits: digits }) : x);
+        return `<td>${f(a)}</td><td class="${cls}">${f(b)}</td>`;
+      };
+      async function show() {
+        const a = document.getElementById("a").value, b = document.getElementById("b").value;
+        const names = [...new Set([...(await files(a)), ...(await files(b))].filter((f) => f.endsWith(".jpg")).map((f) => f.slice(0, -4)))];
+        const list = document.getElementById("list");
+        list.innerHTML = "";
+        for (const name of names) {
+          const [na, nb] = await Promise.all([numbers(a, name), numbers(b, name)]);
+          const el = document.createElement("section");
+          el.className = "shot";
+          el.innerHTML = `<h2>${name}</h2>
+            <div class="view"><img class="a" src="/shots/${a}/${name}.jpg" alt="" /><img class="b" src="/shots/${b}/${name}.jpg" alt="" /><div class="bar"></div><span class="tag a">${a}</span><span class="tag b">${b}</span></div>
+            <table><tr><th></th><th>${a}</th><th>${b}</th></tr>
+              <tr><th>GPU ms (Median)</th>${cell(na?.gpu?.median, nb?.gpu?.median, "gpu")}</tr>
+              <tr><th>CPU ms (Median)</th>${cell(na?.cpu?.median, nb?.cpu?.median, "cpu", true, 2)}</tr>
+              <tr><th>Zeichenaufrufe</th>${cell(na?.calls, nb?.calls, "calls", true, 0)}</tr>
+              <tr><th>Dreiecke</th>${cell(na?.triangles, nb?.triangles, "tris", true, 0)}</tr>
+              <tr><th>Renderer</th><td>${na ? `${na.renderer} r${na.three}` : "–"}</td><td>${nb ? `${nb.renderer} r${nb.three}` : "–"}</td></tr></table>`;
+          const view = el.querySelector(".view");
+          const move = (event) => {
+            const r = view.getBoundingClientRect();
+            view.style.setProperty("--cut", `${Math.min(100, Math.max(0, ((event.clientX - r.left) / r.width) * 100))}%`);
+          };
+          view.addEventListener("pointermove", move);
+          view.addEventListener("pointerdown", move);
+          list.append(el);
+        }
+      }
+      show();
+    </script>
+  </body>
+</html>

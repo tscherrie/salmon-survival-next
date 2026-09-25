@@ -1,0 +1,33 @@
+{
+  "name": "unterlauf",
+  "set": "r180",
+  "renderer": "webgl2",
+  "three": "180",
+  "gpuName": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)",
+  "size": [
+    1600,
+    900
+  ],
+  "screen": [
+    1600,
+    813,
+    1
+  ],
+  "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+  "when": "2026-09-25T17:26:16.650Z",
+  "gpu": {
+    "median": 23.24,
+    "p90": 28.21,
+    "n": 77
+  },
+  "cpu": {
+    "median": 2.2,
+    "p90": 3.1,
+    "n": 80
+  },
+  "calls": 205,
+  "triangles": 1738181,
+  "programs": 146,
+  "textures": 37,
+  "geometries": 351
+}

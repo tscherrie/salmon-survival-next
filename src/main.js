@@ -2544,8 +2544,9 @@ async function start() {
   }
   requestAnimationFrame(tick);
 
-  // Development handles: ?capture=1 with tools/capture-server.mjs running.
-  if (query.get("capture") || query.get("diagnostics") === "1")
+  // Development handles: ?capture=1 with tools/capture-server.mjs running (and ?shots, the
+  // photo points of src/dev/shots.js).
+  if (query.get("capture") || query.get("diagnostics") === "1" || query.has("shots"))
     window.salmon = {
       profile: prof,
       fish,
@@ -2647,6 +2648,7 @@ async function start() {
         return name;
       },
     };
+  if (query.has("shots")) import("./dev/shots.js").then((m) => m.runShots(window.salmon, query));
 }
 
 // The river, on a computer or a phone (?phone still shows the old note that the game wants
