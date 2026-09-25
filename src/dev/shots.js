@@ -27,6 +27,8 @@ export const SHOTS = [
   { name: "stillwasser", stage: "parr", at: 4250, season: "summer", hour: 16 },
   // Below the salmon fall: the curtain, the pool, the foam.
   { name: "lachsfall", stage: "spawner", at: 5150, season: "autumn", hour: 12 },
+  // The salmon fall from its pool, in the air: the curtain, the spray, the mist.
+  { name: "wasserfall", stage: "spawner", at: 5240, season: "autumn", hour: 12, view: { eye: [14, 0, 1.2], target: [-30, 0, 9] } },
   // Above the water at the salmon fall: the surface from above, the banks, the sky.
   { name: "sprung", stage: "spawner", at: 5150, season: "autumn", hour: 12, view: { eye: [-12, 0, 1.4], target: [30, 0, 4] } },
   // Looking down into the brook from just above it: the bed through the water, the banks

@@ -20,7 +20,7 @@ export const mirrorOn = uniform(0);
 const SUNKEN = /^(Plants|Cobbles|Gravel|Food|Eggs|Moon jellies|Laichlachs school|minnow|grayling|troutParr)/;
 // ...and in the window not the white water of a fall either: layer on layer of spray and
 // mist, dear to draw, and from under the water the fall is right there to see anyway.
-const SUNKEN_OR_FALLING = new RegExp(`${SUNKEN.source}|^(Fall|Plunge|Foam|Spray|Plume|Mist)`);
+const SUNKEN_OR_FALLING = new RegExp(`${SUNKEN.source}|^(Fall|Plunge|Foam|Spray|Plume|Mist|Boil)`);
 
 export function createMirror(renderer, { scale = 0.5 } = {}) {
   const target = new THREE.RenderTarget(1, 1, { type: THREE.HalfFloatType });

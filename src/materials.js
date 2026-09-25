@@ -695,23 +695,37 @@ export function createCurtainMaterial({ under = false, light = uniform(1), from 
       const c = mix(vec3(0.62, 0.8, 0.84), vec3(1.35, 1.45, 1.45), smoothstep(0, 0.7, vUv.y).oneMinus().mul(streaks.mul(0.5).add(0.5)));
       return vec4(c.mul(light), a);
     }
-    // uv.x across the lip in units, uv.y down the fall from 0 at the lip to 1.
-    const p = vec2(vUv.x.mul(0.7), vUv.y.mul(5).sub(t.mul(2.6)));
-    const ropes = n1(vec2(vUv.x.mul(1.6), 0).add(vec2(0, t.mul(0.05))))
+    // uv.x across the lip in units, uv.y down the fall from 0 at the lip to 1. The water
+    // gathers speed as it falls: the pattern is laid out along the square root of the
+    // height fallen, so its streaks are short and slow at the lip and long and quick below.
+    const fallen = sqrt(vUv.y);
+    const p = vec2(vUv.x.mul(0.7), fallen.mul(6).sub(t.mul(2.6)));
+    // The ropes wander a little across the sheet on the way down, merge and part.
+    const across = vUv.x.add(n1(vec2(fallen.mul(1.6), vUv.x.mul(0.25).add(t.mul(0.03)))).sub(0.5).mul(1.4));
+    const ropes = n1(vec2(across.mul(1.6), fallen.mul(0.7)).add(vec2(0, t.mul(0.05))))
       .mul(0.6)
-      .add(n1(vec2(vUv.x.mul(4.3), 1)).mul(0.4));
+      .add(n1(vec2(across.mul(4.3), fallen.mul(1.5).add(1))).mul(0.4));
     const streak = n1(p.mul(vec2(3, 0.6)))
       .mul(0.55)
       .add(n1(p.mul(vec2(9, 1.6)).add(3)).mul(0.3))
       .add(n1(p.mul(vec2(23, 4)).add(7)).mul(0.15));
     const body = smoothstep(0.25, 0.75, ropes.mul(0.6).add(streak.mul(0.7)));
-    // It thickens and whitens as it falls and breaks up into spray.
-    const alpha = mix(0.35, 0.85, smoothstep(0, 0.6, vUv.y)).mul(mix(0.3, 1, body)).toVar();
+    // It thickens and whitens as it falls; between the ropes it is thin enough to see the
+    // rock through.
+    const alpha = mix(0.35, 0.85, smoothstep(0, 0.6, vUv.y)).mul(mix(0.2, 1, body)).toVar();
+    // Toward the foot the sheet tears into billows of spray falling with it, and it does
+    // not meet the pool in a line: it goes into the white of the boil.
+    const billow = n1(vec2(vUv.x.mul(0.45), fallen.mul(2.2).sub(t.mul(1.1))).add(13))
+      .mul(0.6)
+      .add(n1(vec2(vUv.x.mul(1.3), fallen.mul(5).sub(t.mul(2))).add(29)).mul(0.4));
+    const torn = smoothstep(0.45, 1, vUv.y);
+    alpha.mulAssign(mix(1, smoothstep(0.2, 0.65, billow).mul(0.8).add(0.35), torn));
+    alpha.mulAssign(smoothstep(1, billow.mul(0.1).add(0.86), vUv.y));
     // Ragged at the sides, thin where it leaves the lip.
     const edge = min(vUv.x.sub(uFrom), uTo.sub(vUv.x));
     alpha.mulAssign(smoothstep(0, 1.2, edge.add(n1(vec2(vUv.y.mul(6).sub(t.mul(2)), vUv.x)).sub(0.5).mul(0.8))));
     alpha.mulAssign(smoothstep(0, 0.12, vUv.y.add(0.02)));
-    const color = mix(vec3(0.5, 0.66, 0.66), vec3(1.5, 1.6, 1.6), smoothstep(0, 0.45, vUv.y).mul(body.mul(0.55).add(0.45))).toVar();
+    const color = mix(vec3(0.5, 0.66, 0.66), vec3(1.5, 1.6, 1.6), smoothstep(0, 0.45, vUv.y).mul(body.mul(0.55).add(0.45)).max(torn.mul(0.9))).toVar();
     // Where it leaves the lip: a glassy tongue, dark and clear, drawn into bright strands,
     // with a sheen where it curls over the edge -- before it breaks up white.
     const tongue = smoothstep(0.03, ropes.mul(0.12).add(0.2), vUv.y).oneMinus();

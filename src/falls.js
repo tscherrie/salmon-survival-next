@@ -11,7 +11,8 @@ import { PointCloud, createBubbleMaterial, createCurtainMaterial, createFoamClou
 
 const PLUME = 2600;
 const SPRAY = 700;
-const MIST = 110;
+const MIST = 160;
+const BOIL = 220;
 
 export function createFalls(scene) {
   const curtainMaterial = createCurtainMaterial();
@@ -333,6 +334,93 @@ export function createFalls(scene) {
   scene.add(mist);
   const wisps = Array.from({ length: MIST }, () => ({ x: 0, y: -1e5, z: 0, vx: 0, vy: 0, vz: 0, age: 1, life: Math.random(), size: 1 }));
 
+  // ---- The boil: where the curtain comes down on the pool the water is thrown back up in
+  // a white wall of spray that falls back into itself (seen from above the water).
+  const boilGeometry = new THREE.BufferGeometry();
+  const boilPositions = new Float32Array(BOIL * 3);
+  const boilSizes = new Float32Array(BOIL);
+  const boilAlpha = new Float32Array(BOIL);
+  boilGeometry.setAttribute("position", new THREE.BufferAttribute(boilPositions, 3));
+  boilGeometry.setAttribute("size", new THREE.BufferAttribute(boilSizes, 1));
+  boilGeometry.setAttribute("alpha", new THREE.BufferAttribute(boilAlpha, 1));
+  boilGeometry.setAttribute("seed", new THREE.BufferAttribute(new Float32Array(BOIL).map(() => Math.random()), 1));
+  const boil = new PointCloud(boilGeometry, createFoamCloudMaterial(boilGeometry, { light: mistMaterial.uniforms.light }));
+  boil.frustumCulled = false;
+  boil.name = "Boil";
+  boil.renderOrder = 3;
+  scene.add(boil);
+  const heaves = Array.from({ length: BOIL }, () => ({ x: 0, y: -1e5, z: 0, vx: 0, vy: 0, vz: 0, age: 1, life: Math.random(), size: 1, top: 0 }));
+  // (The mist and the boil take seconds to build up: when they first show they are run
+  // that long at once, so they are there already.)
+  let airWarm = false;
+
+  function stepMist(c, dt) {
+    const force = Math.min(1.6, 0.35 + c.drop / 12);
+    const strength = Math.min(0.42, 0.12 + c.drop * 0.016) * (c.fall.side ? 0.6 : 1);
+    for (let i = 0; i < MIST; i++) {
+      const w = wisps[i];
+      w.age += dt;
+      if (w.age > w.life) {
+        const spot = c.pick(pickSpot, undefined, Math.random() * 1.8);
+        w.x = spot.x;
+        w.z = spot.z;
+        w.y = c.impact.y + 0.1 + Math.random() * 0.5;
+        w.vx = spot.tx * (0.5 + Math.random() * 1.3) * force + (Math.random() - 0.5) * 0.5;
+        w.vz = spot.tz * (0.5 + Math.random() * 1.3) * force + (Math.random() - 0.5) * 0.5;
+        w.vy = (0.3 + Math.random() * 0.9) * force;
+        w.age = 0;
+        w.life = 2.5 + Math.random() * (2 + c.drop * 0.15);
+        w.size = (0.9 + Math.random() * (0.9 + c.drop * 0.09)) * (c.fall.side ? 0.5 : 1);
+      }
+      w.vy *= Math.exp(-dt * 0.5);
+      w.x += w.vx * dt;
+      w.y += w.vy * dt;
+      w.z += w.vz * dt;
+      mistPositions[i * 3] = w.x;
+      mistPositions[i * 3 + 1] = w.y;
+      mistPositions[i * 3 + 2] = w.z;
+      mistSizes[i] = w.size * (1 + w.age * 0.45);
+      mistAlpha[i] = Math.min(1, w.age * 2) * (1 - smooth(w.life * 0.3, w.life, w.age)) * strength;
+    }
+  }
+
+  function stepBoil(c, dt) {
+    const force = Math.min(1.8, 0.4 + c.drop / 10);
+    const strength = Math.min(0.85, 0.35 + c.drop * 0.026) * (c.fall.side ? 0.6 : 1);
+    for (let i = 0; i < BOIL; i++) {
+      const h = heaves[i];
+      h.age += dt;
+      if (h.age > h.life) {
+        // Mostly under the jets, where the most water comes down.
+        const jet = c.jets[Math.floor(Math.random() * c.jets.length)];
+        const u = Math.random() < 0.7 ? Math.min(c.impact.to, Math.max(c.impact.from, jet + (Math.random() + Math.random() - 1) * 2)) : c.impact.from + Math.random() * (c.impact.to - c.impact.from);
+        const spot = c.pick(pickSpot, u, Math.random() * 0.9);
+        h.x = spot.x;
+        h.z = spot.z;
+        h.top = c.impact.y;
+        h.y = c.impact.y + 0.05 + Math.random() * 0.3;
+        h.vx = spot.tx * (0.3 + Math.random() * 0.9) * force + (Math.random() - 0.5) * 0.6;
+        h.vz = spot.tz * (0.3 + Math.random() * 0.9) * force + (Math.random() - 0.5) * 0.6;
+        h.vy = (1 + Math.random() * 2.5) * force;
+        h.age = 0;
+        h.life = 0.9 + Math.random() * (1 + c.drop * 0.03);
+        h.size = (0.8 + Math.random() * (1 + c.drop * 0.08)) * (c.fall.side ? 0.5 : 1);
+      }
+      // Thrown up, slowed by the air, falling back.
+      h.vy -= 4 * dt;
+      h.vx *= Math.exp(-dt * 1.2);
+      h.vz *= Math.exp(-dt * 1.2);
+      h.x += h.vx * dt;
+      h.y = Math.max(h.top + 0.1, h.y + h.vy * dt);
+      h.z += h.vz * dt;
+      boilPositions[i * 3] = h.x;
+      boilPositions[i * 3 + 1] = h.y;
+      boilPositions[i * 3 + 2] = h.z;
+      boilSizes[i] = h.size * (1 + h.age * 0.8);
+      boilAlpha[i] = Math.min(1, h.age * 6) * (1 - smooth(h.life * 0.4, h.life, h.age)) * strength;
+    }
+  }
+
   let active = null;
   let clock = 0;
 
@@ -468,6 +556,7 @@ export function createFalls(scene) {
       }
       if (nearest !== active) {
         active = nearest;
+        airWarm = false;
         for (const p of particles) {
           p.active = false;
           p.y = -1e5;
@@ -558,41 +647,20 @@ export function createFalls(scene) {
         cloudGeometry.attributes.size.needsUpdate = true;
         cloudGeometry.attributes.alpha.needsUpdate = true;
       }
-      // Mist over the foot of the fall, when the eye is above the water.
-      mist.visible = cloud.visible && cameraPosition.y > level(s) - 0.05;
+      // Mist and the boil over the foot of the fall, when the eye is above the water.
+      mist.visible = boil.visible = cloud.visible && cameraPosition.y > level(s) - 0.05;
       if (mist.visible) {
-        const c = active;
-        const force = Math.min(1.6, 0.35 + c.drop / 12);
-        const strength = Math.min(0.34, 0.1 + c.drop * 0.014) * (c.fall.side ? 0.6 : 1);
-        for (let i = 0; i < MIST; i++) {
-          const w = wisps[i];
-          w.age += dt;
-          if (w.age > w.life) {
-            const spot = c.pick(pickSpot, undefined, Math.random() * 1.8);
-            w.x = spot.x;
-            w.z = spot.z;
-            w.y = c.impact.y + 0.1 + Math.random() * 0.5;
-            w.vx = spot.tx * (0.5 + Math.random() * 1.3) * force + (Math.random() - 0.5) * 0.5;
-            w.vz = spot.tz * (0.5 + Math.random() * 1.3) * force + (Math.random() - 0.5) * 0.5;
-            w.vy = (0.3 + Math.random() * 0.9) * force;
-            w.age = 0;
-            w.life = 2.5 + Math.random() * (2 + c.drop * 0.15);
-            w.size = (0.9 + Math.random() * (0.9 + c.drop * 0.09)) * (c.fall.side ? 0.5 : 1);
-          }
-          w.vy *= Math.exp(-dt * 0.5);
-          w.x += w.vx * dt;
-          w.y += w.vy * dt;
-          w.z += w.vz * dt;
-          mistPositions[i * 3] = w.x;
-          mistPositions[i * 3 + 1] = w.y;
-          mistPositions[i * 3 + 2] = w.z;
-          mistSizes[i] = w.size * (1 + w.age * 0.45);
-          mistAlpha[i] = Math.min(1, w.age * 2) * (1 - smooth(w.life * 0.3, w.life, w.age)) * strength;
-        }
+        if (!airWarm) for (let k = 0; k < 40; k++) stepMist(active, 0.1), stepBoil(active, 0.05);
+        airWarm = true;
+        stepMist(active, dt);
+        stepBoil(active, dt);
         mistGeometry.attributes.position.needsUpdate = true;
         mistGeometry.attributes.size.needsUpdate = true;
         mistGeometry.attributes.alpha.needsUpdate = true;
-      }
+        boilGeometry.attributes.position.needsUpdate = true;
+        boilGeometry.attributes.size.needsUpdate = true;
+        boilGeometry.attributes.alpha.needsUpdate = true;
+      } else airWarm = false;
       // Spray and splash bubbles.
       for (let i = 0; i < SPRAY; i++) {
         const d = drops[i];
