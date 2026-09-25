@@ -1,15 +1,44 @@
 import * as THREE from "three";
-import { rockGeometry } from "../../riverscape/src/environment.js";
-import { GeometryBatch, randomGenerator } from "../../riverscape/src/math.js";
-import { foliageDepth, foliageMaterial } from "../../riverscape/src/foliage.js";
-import { waterLitShader } from "../../riverscape/src/water.js";
+import { rockGeometry } from "./render/geometry.js";
+import { GeometryBatch, randomGenerator } from "./render/geometry.js";
+import { foliageMaterial } from "./render/foliage.js";
+import { surfaceLevelAt, waterLit } from "./render/water.js";
+import {
+  Fn,
+  If,
+  abs,
+  attribute,
+  cameraPosition,
+  cameraViewMatrix,
+  cross,
+  dFdx,
+  dFdy,
+  dot,
+  exp,
+  floor,
+  fract,
+  length,
+  mix,
+  normalView,
+  normalize,
+  positionWorld,
+  pow,
+  property,
+  sin,
+  smoothstep,
+  texture,
+  uv,
+  vec2,
+  vec3,
+  vec4,
+} from "three/tsl";
 import { relaid, COLD_SPRINGS, CRACKS, FALLS, ISLANDS, KING_POOL, MILLS, S, TRIBUTARIES, UNDERCUTS, bed, frame, level, place, section, smooth } from "./course.js";
 import { MODEL_LENGTH, createFishMesh } from "./anatomy.js";
 import { SolidBatch, bankGrass, fallenLeaf, hangingMoss, leafSpray, mossTuft, reeds, sedge, turfTuft } from "./flora.js";
 import { TreeBatch, alder, birch, fallenTrunk, fern, forestMaterial, roots, shrub, willow } from "./forest.js";
 import { trunkColliders, trunkGeometry, withMossChannel } from "./terrain.js";
 import { addPlace } from "./places.js";
-import { photo } from "./materials.js";
+import { PointCloud, perPoint, photo, pointCloud } from "./materials.js";
 import { addClearing } from "./clearings.js";
 import { nettingMaterial } from "./netting.js";
 
@@ -1026,7 +1055,7 @@ for (const q of COLD_SPRINGS) {
       const seeds = Array.from({ length: count }, () => ({ s: q.s + range(-1, 1) * q.radius * 0.45, u: uc + range(-1, 1) * q.radius * 0.45, t: random(), speed: range(0.3, 0.8) }));
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      const points = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.12, color: 0xd8e8e8, transparent: true, opacity: 0.55, depthWrite: false }));
+      const points = pointCloud(g, { size: 0.12 * 0.6, color: 0xd8e8e8, opacity: 0.55 });
       points.frustumCulled = false;
       points.name = "Upwelling";
       ctx.group.add(points);
@@ -1513,16 +1542,18 @@ addFeature({
       // A warm glow round each lamp in the water.
       const haloGeometry = new THREE.BufferGeometry();
       haloGeometry.setAttribute("position", new THREE.BufferAttribute(haloPositions, 3));
-      const halo = new THREE.Points(
-        haloGeometry,
-        new THREE.ShaderMaterial({
-          transparent: true,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-          vertexShader: `void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; gl_PointSize = clamp(9.0 * 620.0 / max(-mv.z, 0.5), 2.0, 900.0); }`,
-          fragmentShader: `void main() { float r = length(gl_PointCoord - 0.5) * 2.0; float a = exp(-r * r * 5.0) * 0.4 + exp(-r * r * 40.0) * 0.5; if (a < 0.003) discard; gl_FragColor = vec4(vec3(1.0, 0.86, 0.6) * a, 1.0); }`,
-        }),
-      );
+      const haloMaterial = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true });
+      haloMaterial.positionNode = perPoint(haloGeometry, "position");
+      // About nine metres across.
+      haloMaterial.scaleNode = vec2(7);
+      const haloShade = Fn(() => {
+        const r = length(uv().sub(0.5)).mul(2);
+        return exp(r.mul(r).mul(-5)).mul(0.4).add(exp(r.mul(r).mul(-40)).mul(0.5));
+      })();
+      haloMaterial.colorNode = vec3(1, 0.86, 0.6).mul(haloShade);
+      haloMaterial.alphaTest = 0.003;
+      haloMaterial.opacityNode = haloShade.greaterThan(0.003).select(1, 0);
+      const halo = new PointCloud(haloGeometry, haloMaterial);
       halo.frustumCulled = false;
       halo.name = "Lamp glow";
       ctx.group.add(halo);
@@ -1598,7 +1629,7 @@ addFeature({
     const feedGeometry = new THREE.BufferGeometry();
     feedGeometry.setAttribute("position", new THREE.BufferAttribute(feedPositions, 3));
     feedGeometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(pens[1].x, lv - D / 2, pens[1].z), R * 5 + D);
-    const feedPoints = new THREE.Points(feedGeometry, new THREE.PointsMaterial({ color: 0x4a3220, size: 0.22, sizeAttenuation: true }));
+    const feedPoints = pointCloud(feedGeometry, { color: 0x4a3220, size: 0.22 * 0.6, transparent: false, depthWrite: true });
     feedPoints.name = "Sinking feed";
     ctx.group.add(feedPoints);
     ctx.animate.push((dt, env) => {
@@ -1748,89 +1779,68 @@ addFeature({
 // With `planks` a mesh's uv marks out planks (u along them, v across, one plank a unit):
 // dark seams between them and butt joints along them.
 function builtMaterial({ map, normal = null, scale = 1 / 6, roughness = 0.9, side = THREE.FrontSide, fouling = 1, planks = false }) {
-  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness, side });
-  material.onBeforeCompile = (shader) => {
-    waterLitShader(shader);
-    shader.uniforms.detailMap = { value: map };
-    shader.uniforms.detailNormal = { value: normal ?? map };
-    if (planks) {
-      shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec2 plank;\nvarying vec2 vPlank;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvPlank = plank;");
-    }
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        "#include <common>",
-        `#include <common>
-        uniform sampler2D detailMap;
-        uniform sampler2D detailNormal;
-        ${planks ? "varying vec2 vPlank;" : ""}
-        float builtHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-        float builtNoise(vec2 p) {
-          vec2 i = floor(p), f = fract(p);
-          f = f * f * (3.0 - 2.0 * f);
-          return mix(mix(builtHash(i), builtHash(i + vec2(1, 0)), f.x), mix(builtHash(i + vec2(0, 1)), builtHash(i + vec2(1, 1)), f.x), f.y);
-        }
-        vec3 gBuiltNormal = vec3(0.0);`,
-      )
-      .replace(
-        "#include <color_fragment>",
-        `#include <color_fragment>
-        {
-          vec3 P = vWaterPosition;
-          // The surface's own facing, from the geometry as drawn (some of these meshes carry
-          // no trustworthy normals), turned toward the eye.
-          vec3 Nw = normalize(cross(dFdx(P), dFdy(P)));
-          if (dot(Nw, cameraPosition - P) < 0.0) Nw = -Nw;
-          vec3 b = pow(abs(Nw), vec3(4.0));
-          b /= dot(b, vec3(1.0));
-          float s = ${scale.toFixed(5)};
-          ${
-            map
-              ? `vec3 tex = texture2D(detailMap, P.zy * s).rgb * b.x + texture2D(detailMap, P.xz * s).rgb * b.y + texture2D(detailMap, P.xy * s).rgb * b.z;
-          diffuseColor.rgb *= 0.5 + 1.25 * dot(tex, vec3(0.3, 0.55, 0.15));`
-              : ""
-          }
-          ${
-            normal
-              ? `vec3 nx = texture2D(detailNormal, P.zy * s).xyz * 2.0 - 1.0;
-          vec3 ny = texture2D(detailNormal, P.xz * s).xyz * 2.0 - 1.0;
-          vec3 nz = texture2D(detailNormal, P.xy * s).xyz * 2.0 - 1.0;
-          gBuiltNormal = vec3(0.0, nx.y, nx.x) * b.x + vec3(ny.x, 0.0, ny.y) * b.y + vec3(nz.x, nz.y, 0.0) * b.z;`
-              : ""
-          }
-          ${
-            planks
-              ? `// Seams between the planks, butt joints along them, each plank its own shade.
-          float row = floor(vPlank.y);
-          float across = fract(vPlank.y);
-          float seam = smoothstep(0.0, 0.07, across) * smoothstep(1.0, 0.93, across);
-          float along = vPlank.x + builtHash(vec2(row, 3.0)) * 13.0;
-          float joint = smoothstep(0.0, 0.008, fract(along / 13.0)) * smoothstep(1.0, 0.992, fract(along / 13.0));
-          diffuseColor.rgb *= (0.8 + 0.3 * builtHash(vec2(row, floor(along / 13.0)))) * mix(0.35, 1.0, seam * joint);`
-              : ""
-          }
-          float below = surfaceLevelAt(P) - P.y;
-          float wet = smoothstep(-0.2, 1.2, below);
-          float patches = builtNoise(P.xz * 0.35 + P.y * 0.3) * 0.65 + builtNoise(P.xz * 1.7 - P.y) * 0.35;
-          // Under water: a brown film and green weed in patches, thickest on what faces up.
-          float weed = wet * ${fouling.toFixed(2)} * smoothstep(0.3, 0.75, patches + 0.25 * Nw.y);
-          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(0.72, 0.68, 0.48), wet * 0.55 * ${Math.min(1, fouling).toFixed(2)});
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.07, 0.12, 0.04) + 0.05 * builtNoise(P.xz * 6.0), clamp(weed * 0.7, 0.0, 1.0));
-          // The tide mark: dark just about the surface.
-          diffuseColor.rgb *= 1.0 - 0.35 * exp(-pow(below / 0.6, 2.0));
-          // Moss on the tops, above the water.
-          float moss = (1.0 - wet) * smoothstep(0.55, 0.9, Nw.y) * smoothstep(0.45, 0.8, patches);
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.11, 0.15, 0.05), moss * 0.6);
-        }`,
-      )
-      .replace(
-        "#include <normal_fragment_maps>",
-        `#include <normal_fragment_maps>
-        normal = normalize(normal + (viewMatrix * vec4(gBuiltNormal * 0.55, 0.0)).xyz);`,
-      );
+  // (The vertex colours are read by the colour node itself.)
+  const material = new THREE.MeshStandardNodeMaterial({ roughness, side });
+  const builtNormal = property("vec3", "builtNormal");
+  const hash = (p) => fract(sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453));
+  const noise = (p) => {
+    const i = floor(p),
+      f = fract(p);
+    const w = f.mul(f).mul(f.mul(-2).add(3));
+    return mix(mix(hash(i), hash(i.add(vec2(1, 0))), w.x), mix(hash(i.add(vec2(0, 1))), hash(i.add(vec2(1, 1))), w.x), w.y);
   };
-  material.customProgramCacheKey = () => `salmon-built-${map?.uuid ?? "plain"}-${normal ? 1 : 0}-${planks ? 1 : 0}-${fouling}`;
+  const plank = planks ? attribute("plank", "vec2") : null;
+  material.colorNode = Fn(() => {
+    const P = positionWorld;
+    // The surface's own facing, from the geometry as drawn (some of these meshes carry no
+    // trustworthy normals), turned toward the eye.
+    const Nw = normalize(cross(dFdx(P), dFdy(P))).toVar();
+    If(dot(Nw, cameraPosition.sub(P)).lessThan(0), () => {
+      Nw.assign(Nw.negate());
+    });
+    const b = pow(abs(Nw), vec3(4));
+    const w = b.div(dot(b, vec3(1)));
+    const color = attribute("color", "vec3").toVar();
+    builtNormal.assign(vec3(0));
+    if (map) {
+      const tex = texture(map, P.zy.mul(scale))
+        .rgb.mul(w.x)
+        .add(texture(map, P.xz.mul(scale)).rgb.mul(w.y))
+        .add(texture(map, P.xy.mul(scale)).rgb.mul(w.z));
+      color.mulAssign(dot(tex, vec3(0.3, 0.55, 0.15)).mul(1.25).add(0.5));
+    }
+    if (normal) {
+      const n = (q) => texture(normal, q).xyz.mul(2).sub(1);
+      const nx = n(P.zy.mul(scale)),
+        ny = n(P.xz.mul(scale)),
+        nz = n(P.xy.mul(scale));
+      builtNormal.assign(vec3(0, nx.y, nx.x).mul(w.x).add(vec3(ny.x, 0, ny.y).mul(w.y)).add(vec3(nz.x, nz.y, 0).mul(w.z)));
+    }
+    if (planks) {
+      // Seams between the planks, butt joints along them, each plank its own shade.
+      const row = floor(plank.y);
+      const across = fract(plank.y);
+      const seam = smoothstep(0, 0.07, across).mul(smoothstep(1, 0.93, across));
+      const along = plank.x.add(hash(vec2(row, 3)).mul(13));
+      const joint = smoothstep(0, 0.008, fract(along.div(13))).mul(smoothstep(1, 0.992, fract(along.div(13))));
+      color.mulAssign(hash(vec2(row, floor(along.div(13)))).mul(0.3).add(0.8).mul(mix(0.35, 1, seam.mul(joint))));
+    }
+    const below = surfaceLevelAt(P).sub(P.y);
+    const wet = smoothstep(-0.2, 1.2, below);
+    const patches = noise(P.xz.mul(0.35).add(P.y.mul(0.3))).mul(0.65).add(noise(P.xz.mul(1.7).sub(P.y)).mul(0.35));
+    // Under water: a brown film and green weed in patches, thickest on what faces up.
+    const weed = wet.mul(fouling).mul(smoothstep(0.3, 0.75, patches.add(Nw.y.mul(0.25))));
+    color.assign(mix(color, color.mul(vec3(0.72, 0.68, 0.48)), wet.mul(0.55 * Math.min(1, fouling))));
+    color.assign(mix(color, vec3(0.07, 0.12, 0.04).add(noise(P.xz.mul(6)).mul(0.05)), weed.mul(0.7).clamp(0, 1)));
+    // The tide mark: dark just about the surface.
+    color.mulAssign(exp(pow(below.div(0.6), 2).negate()).mul(-0.35).add(1));
+    // Moss on the tops, above the water.
+    const moss = wet.oneMinus().mul(smoothstep(0.55, 0.9, Nw.y)).mul(smoothstep(0.45, 0.8, patches));
+    color.assign(mix(color, vec3(0.11, 0.15, 0.05), moss.mul(0.6)));
+    return color;
+  })();
+  material.normalNode = normalize(normalView.add(cameraViewMatrix.mul(vec4(builtNormal.mul(0.55), 0)).xyz));
+  waterLit(material);
   return material;
 }
 
@@ -1838,7 +1848,6 @@ let scene0 = null;
 export function createFeatures(scene, { rocks, locate, surfaceMaterial = null }) {
   scene0 = scene;
   const leaves = foliageMaterial();
-  const leafShadow = foliageDepth({ animated: true });
   const treeMaterial = forestMaterial();
   const shapes = Array.from({ length: 5 }, (_, i) => withMossChannel(rockGeometry(i * 4.1 + 2.3, 30, 1)));
   // Earth and turf, for the overhanging banks; stone and timber for what people built;
@@ -1916,7 +1925,6 @@ export function createFeatures(scene, { rocks, locate, surfaceMaterial = null })
       geometry.computeBoundingSphere();
       geometry.boundingSphere.radius += 8;
       const mesh = new THREE.Mesh(geometry, leaves);
-      mesh.customDepthMaterial = leafShadow;
       mesh.castShadow = mesh.receiveShadow = true;
       mesh.name = "Plants";
       group.add(mesh);

@@ -52,25 +52,32 @@ const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve))
 
 // The address of one point: the game with its settings, the run's name, the point's name.
 export function shotURL(set, shot, extra = "") {
-  const q = new URLSearchParams({ capture: "1", seed: "7", day: "still", rain: "0", quality: "detail", shots: set, shot: shot.name, stage: shot.stage, at: String(shot.at), season: shot.season, hour: String(shot.hour) });
+  const here = new URLSearchParams(location.search);
+  for (const flag of ["stages", "webgl", "smoke"]) if (here.has(flag)) extra += `&${flag}`;
+  // (A run at another quality: ?shots=set&q=eco.)
+  if (here.get("q")) extra += `&q=${here.get("q")}`;
+  const q = new URLSearchParams({ capture: "1", seed: "7", day: "still", rain: "0", quality: new URLSearchParams(location.search).get("q") || "detail", shots: set, shot: shot.name, stage: shot.stage, at: String(shot.at), season: shot.season, hour: String(shot.hour) });
   q.set("new", "");
   if (shot.u != null) q.set("u", String(shot.u));
   if (shot.event) q.set("event", shot.event);
   return `${location.pathname}?${q.toString().replace("new=", "new")}${extra}`;
 }
 
-// Time n frames on the graphics card (WebGL2's timer query), and what the draw costs the
-// processor; with no timer on this card, only the latter.
+// Time n frames on the graphics card (the WebGPU renderer's timestamp queries, or WebGL 2's
+// timer query for the old renderer), and what the draw costs the processor.
 async function measure(salmon, n = 90) {
   const { renderer } = salmon;
-  const gl = renderer.getContext?.();
-  const ext = gl?.getExtension?.("EXT_disjoint_timer_query_webgl2");
   const gpu = [],
-    cpu = [],
-    pending = [];
-  renderer.info.autoReset = false;
+    cpu = [];
   let calls = 0,
     triangles = 0;
+  const webgpuRenderer = !!renderer.isWebGPURenderer;
+  const timed = webgpuRenderer ? !!renderer.backend?.trackTimestamp : false;
+  const gl = webgpuRenderer ? null : renderer.getContext?.();
+  const ext = gl?.getExtension?.("EXT_disjoint_timer_query_webgl2");
+  const pending = [];
+  renderer.info.autoReset = false;
+  if (timed) await renderer.resolveTimestampsAsync("render");
   for (let i = 0; i < n; i++) {
     let query = null;
     if (ext) {
@@ -81,13 +88,17 @@ async function measure(salmon, n = 90) {
     const t0 = performance.now();
     salmon.draw(0);
     cpu.push(performance.now() - t0);
-    calls = renderer.info.render.calls;
+    calls = renderer.info.render.drawCalls ?? renderer.info.render.calls;
     triangles = renderer.info.render.triangles;
     if (ext) {
       gl.endQuery(ext.TIME_ELAPSED_EXT);
       pending.push(query);
     }
     await nextFrame();
+    if (timed) {
+      const ms = await renderer.resolveTimestampsAsync("render");
+      if (Number.isFinite(ms) && ms > 0) gpu.push(ms);
+    }
     // Read back whatever the card has finished.
     while (ext && pending.length && gl.getQueryParameter(pending[0], gl.QUERY_RESULT_AVAILABLE)) {
       const q = pending.shift();
@@ -101,8 +112,97 @@ async function measure(salmon, n = 90) {
     const at = (p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
     return sorted.length ? { median: +at(0.5).toFixed(2), p90: +at(0.9).toFixed(2), n: sorted.length } : null;
   };
+  const memory = renderer.info.memory;
   // (The first frames warm up; keep the rest.)
-  return { gpu: stats(gpu.slice(10)), cpu: stats(cpu.slice(10)), calls, triangles, programs: renderer.info.programs?.length ?? 0, textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries };
+  return { gpu: stats(gpu.slice(10)), cpu: stats(cpu.slice(10)), calls, triangles, programs: renderer.info.programs?.length ?? memory.programs ?? 0, textures: memory.textures, geometries: memory.geometries };
+}
+
+// A little play at the point: swimming and turning, a stage celebrated, a death and the next
+// life, with a frame drawn every quarter second so every material in them is built.
+async function smoke(salmon, shot) {
+  salmon.pause(true);
+  salmon.view(null);
+  const { input } = salmon;
+  const play = async (seconds, script) => {
+    let drawn = 0;
+    await salmon.run(seconds, (t) => {
+      script?.(t);
+      if (t >= drawn) {
+        drawn += 0.25;
+        salmon.draw(1 / 30);
+      }
+    });
+  };
+  await play(6, (t) => {
+    input.forward = true;
+    input.yaw = Math.sin(t * 0.7) * 0.02;
+    input.lunge = t % 2 < 0.05;
+  });
+  input.forward = false;
+  salmon.celebrate?.(salmon.fish.stage);
+  await play(3);
+  if (shot.stage !== "spawner") {
+    salmon.die?.("smoke test");
+    await play(7);
+  }
+  for (let i = 0; i < 4; i++) {
+    salmon.draw(0);
+    await nextFrame();
+  }
+}
+
+// Frames drawn back to back, then waited for: what one frame really costs, card and all
+// (timestamps per pass overlap on tile-based GPUs, Apple's among them, and add up to more).
+async function throughput(salmon, n = 60) {
+  const { renderer } = salmon;
+  const sync = async () => {
+    const device = renderer.backend?.device;
+    if (device) return device.queue.onSubmittedWorkDone();
+    const gl = renderer.backend?.gl ?? renderer.getContext?.();
+    const pixel = new Uint8Array(4);
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+  };
+  const runs = [];
+  for (let k = 0; k < 3; k++) {
+    await sync();
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) salmon.draw(0);
+    await sync();
+    runs.push((performance.now() - t0) / n);
+    await nextFrame();
+  }
+  runs.sort((a, b) => a - b);
+  return +runs[1].toFixed(2);
+}
+
+// Where the frame's time on the card goes: the caustic net, the scene (with its shadow map),
+// and the passes after it, each timed on its own (WebGPU timestamps, one stage at a time).
+async function stages(salmon, n = 30) {
+  const { renderer, scene, camera, post, caustics, key } = salmon;
+  if (!renderer.backend?.trackTimestamp) return null;
+  const time = async (fn) => {
+    const list = [];
+    for (let i = 0; i < n; i++) {
+      await renderer.resolveTimestampsAsync("render");
+      fn();
+      await nextFrame();
+      const ms = await renderer.resolveTimestampsAsync("render");
+      if (Number.isFinite(ms)) list.push(ms);
+    }
+    list.sort((a, b) => a - b);
+    return +list[Math.floor(list.length / 2)].toFixed(2);
+  };
+  const out = {};
+  out.caustics = await time(() => caustics.render());
+  out.scene = await time(() => {
+    renderer.shadowMap.needsUpdate = true;
+    renderer.setRenderTarget(post.main);
+    renderer.render(scene, camera);
+  });
+  out.post = await time(() => post.render({ light: key, sunLight: new salmon.THREE.Vector3(1, 1, 1), density: 0.02 }));
+  for (const [name, fn] of post.debugPasses?.() ?? []) out[`post ${name}`] = await time(fn);
+  out.whole = await time(() => salmon.draw(0));
+  return out;
 }
 
 // Which graphics card drew it (a software renderer would make the timings meaningless).
@@ -138,6 +238,10 @@ export async function runShots(salmon, query) {
   }
   const shot = list[index];
   banner(`${set}: ${shot.name} (${index + 1}/${list.length})`);
+  // What went wrong so far, and every few seconds what has gone wrong since.
+  const sendLog = () => window.__shotLog?.length && fetch(`/__report/${set}/${shot.name}-log`, { method: "POST", body: JSON.stringify(window.__shotLog, null, 1) });
+  sendLog();
+  const logTimer = setInterval(sendLog, 3000);
   document.body.classList.add("shooting");
   const { course } = salmon;
   // The river built all round, the fish and its neighbours settled into it.
@@ -166,7 +270,11 @@ export async function runShots(salmon, query) {
     salmon.draw(0);
     await nextFrame();
   }
+  // (?smoke: the game played a little after the picture, to catch what breaks in play.)
+  if (query.has("smoke")) await smoke(salmon, shot);
   const numbers = await measure(salmon);
+  numbers.frame = await throughput(salmon);
+  if (query.has("stages")) numbers.stages = await stages(salmon);
   await salmon.capture(`${set}/${shot.name}`, 1600, 900);
   const report = {
     name: shot.name,
@@ -180,6 +288,8 @@ export async function runShots(salmon, query) {
     when: new Date().toISOString(),
     ...numbers,
   };
+  clearInterval(logTimer);
+  await sendLog();
   await fetch(`/__report/${set}/${shot.name}`, { method: "POST", body: JSON.stringify(report, null, 2) });
   await nextTask();
   if (index + 1 < list.length) location.href = shotURL(set, list[index + 1], extra);

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { waterLitShader } from "../../riverscape/src/water.js";
+import { waterLit } from "./render/water.js";
 import { S, bed, level, locate, place } from "./course.js";
 import { MODEL_LENGTH, createFishMesh } from "./anatomy.js";
 import { SolidBatch } from "./flora.js";
@@ -58,9 +58,7 @@ export function createNets(scene) {
   const group = new THREE.Group();
   group.name = "Nets";
   const netMaterial = nettingMaterial({ color: new THREE.Color(0.34, 0.42, 0.37), mesh: 1.2, hang: 1.3, twine: 0.05, opacity: 0.9, fouling: 0.4, weed: 0.22, sway: 0.55, key: "gill" });
-  const gearMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
-  gearMaterial.onBeforeCompile = (shader) => waterLitShader(shader);
-  gearMaterial.customProgramCacheKey = () => "salmon-net-gear-v1";
+  const gearMaterial = waterLit(new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.6 }));
   const gear = new SolidBatch();
   const m = new THREE.Matrix4(),
     q = new THREE.Quaternion(),

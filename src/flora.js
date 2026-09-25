@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { blade, stem } from "../../riverscape/src/foliage.js";
+import { blade, stem } from "./render/foliage.js";
 
 // What grows in a northern river and the sea beyond it, built from the aquarium's blade
 // and stem generators so it sways in the same current:

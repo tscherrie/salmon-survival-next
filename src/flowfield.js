@@ -12,7 +12,7 @@
 // its own speed over out.base; one without (the specks) adds it as it is.
 
 import * as THREE from "three";
-import { flowUniforms } from "../../riverscape/src/flow.js";
+import { Fn, clamp, smoothstep, texture, texture3D, uniform, vec2, vec3 } from "three/tsl";
 
 const smooth = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -33,28 +33,34 @@ function floatTexture(data, width, height, depth) {
   texture.needsUpdate = true;
   return texture;
 }
+const eddyTexture = floatTexture(new Float32Array(EDDY_N * EDDY_N * 4), EDDY_N, EDDY_N);
 export const eddyUniforms = {
-  eddyMap: { value: floatTexture(new Float32Array(EDDY_N * EDDY_N * 4), EDDY_N, EDDY_N) },
-  eddyOrigin: { value: new THREE.Vector2() },
-  eddySize: { value: 1 },
-  eddyOn: { value: 0 },
+  eddyOrigin: uniform(new THREE.Vector2()),
+  eddySize: uniform(1),
+  eddyOn: uniform(0),
 };
-export const eddyGLSL = /* glsl */ `
-  uniform sampler2D eddyMap;
-  uniform vec2 eddyOrigin;
-  uniform float eddySize;
-  uniform float eddyOn;
-  // xy: how the stones change the current here; z: its spin; w: how far up to the surface
-  // the stones making it reach. Nothing outside the square round the fish.
-  vec4 eddyAt(vec2 q) {
-    vec2 uv = (q - eddyOrigin) / eddySize;
-    vec2 inside = smoothstep(vec2(0.0), vec2(0.08), uv) * (1.0 - smoothstep(vec2(0.92), vec2(1.0), uv));
-    return texture2D(eddyMap, clamp(uv, 0.0, 1.0)) * inside.x * inside.y * eddyOn;
-  }
-`;
-// For the plants: the riverscape foliage's own flow texture, pointed at the square.
+// xy: how the stones change the current here; z: its spin; w: how far up to the surface the
+// stones making it reach. Nothing outside the square round the fish.
+export const eddyAt = Fn(([q]) => {
+  const uv = q.sub(eddyUniforms.eddyOrigin).div(eddyUniforms.eddySize);
+  const inside = smoothstep(vec2(0), vec2(0.08), uv).mul(smoothstep(vec2(0.92), vec2(1), uv).oneMinus());
+  return texture(eddyTexture, clamp(uv, 0, 1)).mul(inside.x.mul(inside.y).mul(eddyUniforms.eddyOn));
+});
+
+// For the plants: how far the foliage round the fish has been pushed (rgb) and how hard the
+// water is moving (a), over a box round the fish, from the same worker.
 const PLANT_N = EDDY_N / 2;
 const plantTexture = floatTexture(new Float32Array(PLANT_N * 2 * PLANT_N * 4), PLANT_N, 2, PLANT_N);
+export const flowUniforms = {
+  flowMin: uniform(new THREE.Vector3(0, -1e4, 0)),
+  flowSize: uniform(new THREE.Vector3(1, 1, 1)),
+  flowOn: uniform(0),
+};
+export const flowAt = Fn(([p]) => {
+  const uvw = p.sub(flowUniforms.flowMin).div(flowUniforms.flowSize);
+  const inside = smoothstep(vec3(0), vec3(0.04), uvw).mul(smoothstep(vec3(0.96), vec3(1), uvw).oneMinus());
+  return texture3D(plantTexture, clamp(uvw, 0, 1)).mul(inside.x.mul(inside.y).mul(inside.z).mul(flowUniforms.flowOn));
+});
 
 export function createFlowField({ query } = {}) {
   let worker = null;
@@ -81,15 +87,14 @@ export function createFlowField({ query } = {}) {
       stats.steps = snap.steps;
       stats.E = snap.E;
       // The surface's and the plants' pictures of it.
-      const surface = eddyUniforms.eddyMap.value;
-      surface.image.data = snap.SURF;
-      surface.needsUpdate = true;
+      eddyTexture.image.data = snap.SURF;
+      eddyTexture.needsUpdate = true;
       eddyUniforms.eddyOrigin.value.set(snap.X0, snap.Z0);
       eddyUniforms.eddySize.value = snap.E;
       eddyUniforms.eddyOn.value = 1;
       plantTexture.image.data = snap.PLANTS;
       plantTexture.needsUpdate = true;
-      flowUniforms.flowField.value = plantTexture;
+      flowUniforms.flowOn.value = 1;
       const span = snap.plantHigh - snap.plantLow;
       flowUniforms.flowMin.value.set(snap.X0, snap.plantLow - span * 0.5, snap.Z0);
       flowUniforms.flowSize.value.set(snap.E, span * 2, snap.E);
@@ -99,7 +104,7 @@ export function createFlowField({ query } = {}) {
       failed = true;
       snap = null;
       eddyUniforms.eddyOn.value = 0;
-      flowUniforms.flowField.value = null;
+      flowUniforms.flowOn.value = 0;
     };
     const tune = {};
     for (const key of ["relax", "confine", "iterations"]) if (query?.has(key)) tune[key] = Number(query.get(key));

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { pointCloud } from "./materials.js";
 import { MODEL_LENGTH, createFishMesh } from "./anatomy.js";
 import { S, bed, frame, level, locate, place, section } from "./course.js";
 import { mode } from "./vegan.js";
@@ -53,8 +54,7 @@ export function createRedd(scene) {
   grad.addColorStop(1, "rgba(255,255,255,0)");
   g.fillStyle = grad;
   g.fillRect(0, 0, 32, 32);
-  const puffMaterial = new THREE.PointsMaterial({ size: 1.4, map: new THREE.CanvasTexture(dot), vertexColors: true, transparent: true, opacity: 0.55, depthWrite: false, sizeAttenuation: true });
-  const puffs = new THREE.Points(puffGeometry, puffMaterial);
+  const puffs = pointCloud(puffGeometry, { size: 1.4 * 0.6, map: new THREE.CanvasTexture(dot), vertexColors: true, opacity: 0.55 });
   puffs.frustumCulled = false;
   puffs.visible = false;
   puffs.name = "Redd clouds";

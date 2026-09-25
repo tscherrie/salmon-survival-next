@@ -1,4 +1,37 @@
 import * as THREE from "three";
+import {
+  Fn,
+  If,
+  abs,
+  atan,
+  attribute,
+  cameraViewMatrix,
+  cos,
+  dot,
+  faceDirection,
+  float,
+  floor,
+  fract,
+  length,
+  max,
+  mix,
+  modelNormalMatrix,
+  normalGeometry,
+  normalize,
+  positionLocal,
+  positionWorld,
+  pow,
+  select,
+  sin,
+  smoothstep,
+  step,
+  texture,
+  uniform,
+  varying,
+  vec2,
+  vec3,
+  vec4,
+} from "three/tsl";
 import { photo } from "./materials.js";
 
 // The forest above the banks: Norway spruce, Scots pine and downy birch, and under them
@@ -491,137 +524,110 @@ export function fallenTrunk(batch, x, y, z, length, random) {
 // ---------------------------------------------------------------------------------------
 // The material: shared by every block's forest.
 export const treeUniforms = {
-  treeTime: { value: 0 },
-  treeWind: { value: 0.25 },
-  treeAutumn: { value: 0 },
-  treeBare: { value: 0 },
-  treeSnow: { value: 0 },
+  treeTime: uniform(0),
+  treeWind: uniform(0.25),
+  treeAutumn: uniform(0),
+  treeBare: uniform(0),
+  treeSnow: uniform(0),
 };
 
+const leafHash = (p) => fract(sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453));
+
+// Whether this point of a card is needle or leaf (and how light), or the gap between (-1).
+const foliageTone = Fn(([l]) => {
+  const tone = float(1).toVar();
+  const kind = l.z;
+  const u = l.x.clamp(0, 1),
+    v = l.y,
+    av = abs(v);
+  If(kind.greaterThanEqual(0.5).and(kind.lessThan(1.5)), () => {
+    // A spruce spray: a feather of side shoots, ragged at the edge. Broad from where it
+    // leaves the trunk (so the trunk is hidden), tapering out.
+    const env = mix(0.55, 1, smoothstep(0, 0.3, u)).mul(smoothstep(0.55, 1, u).mul(-0.85).add(1));
+    const twig = fract(u.mul(13).sub(av.mul(2.6)).add(l.w.mul(3)));
+    const edge = leafHash(floor(vec2(u.mul(70), v.mul(14))).add(l.w.mul(17)));
+    const gap = av.greaterThan(env).or(av.greaterThan(0.08).and(twig.greaterThan(0.76))).or(av.greaterThan(env.mul(0.72)).and(edge.lessThan(0.35)));
+    tone.assign(select(gap, float(-1), edge.mul(0.25).add(0.8).add(smoothstep(0.5, 1, av.div(env)).mul(0.2))));
+  })
+    .ElseIf(kind.greaterThanEqual(1.5).and(kind.lessThan(2.5)), () => {
+      // Leaves: small ovals scattered thick over a rounded clump.
+      const q = vec2(u.mul(2).sub(1), v);
+      const r = length(q);
+      const g = q.mul(5.5).add(l.w.mul(7));
+      const cell = floor(g);
+      const h = leafHash(cell);
+      const f = fract(g).sub(0.5).sub(vec2(h, leafHash(cell.add(3.1))).sub(0.5).mul(0.5));
+      const gap = r.greaterThan(1).or(length(f.mul(vec2(1, 1.45))).greaterThan(0.5)).or(h.lessThan(smoothstep(0.5, 1, r).mul(0.55).add(0.08)));
+      tone.assign(select(gap, float(-1), h.mul(0.5).add(0.75)));
+    })
+    .ElseIf(kind.greaterThanEqual(2.5).and(kind.lessThan(3.5)), () => {
+      // A pine's tuft: needles bursting from a point.
+      const q = vec2(u.mul(2).sub(1), v);
+      const r = length(q),
+        a = atan(q.y, q.x);
+      const ray = abs(fract(a.mul(2.5).add(l.w.mul(5))).sub(0.5)).mul(2);
+      const reach = leafHash(vec2(floor(a.mul(5).add(l.w.mul(9))), l.w)).mul(0.35).add(0.65);
+      tone.assign(select(r.greaterThan(reach.mul(ray.mul(-0.6).add(1)).add(0.12)), float(-1), r.mul(0.35).add(0.8)));
+    })
+    .ElseIf(kind.greaterThanEqual(3.5), () => {
+      // A fern's frond: a stalk and its rows of leaflets.
+      const env = pow(sin(u.mul(3.1416)), 0.7).mul(u.mul(-0.35).add(1));
+      const gap = av.greaterThan(env).or(av.greaterThan(0.08).and(fract(u.mul(14).sub(av.mul(1.4))).greaterThan(0.6)));
+      tone.assign(select(gap, float(-1), u.mul(0.3).add(0.85)));
+    });
+  return tone;
+});
+
 export function createTreeMaterial() {
-  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, side: THREE.DoubleSide, emissive: 0x0a1307, emissiveIntensity: 1 });
-  material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, treeUniforms);
-    shader.uniforms.barkMap = { value: photo("pine_bark_diff", true) };
-    shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nvarying vec3 vTreeWorld;")
-      .replace("#include <worldpos_vertex>", "#include <worldpos_vertex>\nvTreeWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;");
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        "#include <common>",
-        `#include <common>
-        attribute vec4 leaf;
-        attribute float sway;
-        varying vec4 vLeaf;
-        uniform float treeTime, treeWind, treeAutumn, treeBare, treeSnow;`,
-      )
-      .replace(
-        "#include <begin_vertex>",
-        `#include <begin_vertex>
-        vLeaf = leaf;
-        float swayPhase = dot(position.xz, vec2(0.043, 0.061));
-        transformed.xz += vec2(sin(treeTime * 1.3 + swayPhase), cos(treeTime * 1.05 + swayPhase * 1.7)) * sway * treeWind;`,
-      )
-      .replace(
-        "#include <color_vertex>",
-        `#include <color_vertex>
-        #ifdef USE_COLOR
-          float kind = leaf.z;
-          if (kind > 1.5 && kind < 2.5) {
-            // Birch and bilberry in autumn: yellow, some of it rust.
-            vec3 fall = mix(vec3(0.6, 0.46, 0.08), vec3(0.5, 0.2, 0.05), step(0.78, leaf.w));
-            vColor.rgb = mix(vColor.rgb, fall, treeAutumn * smoothstep(0.0, 0.5, leaf.w + 0.25));
-          } else if (kind > 3.5) {
-            vColor.rgb = mix(vColor.rgb, vec3(0.32, 0.2, 0.09), max(treeAutumn * 0.8, treeBare));
-          } else if (kind > 0.5) {
-            // Snow lies on the tops of the sprays and tufts.
-            vColor.rgb = mix(vColor.rgb, vec3(0.85, 0.88, 0.92), treeSnow * smoothstep(0.15, 0.6, normal.y) * step(0.3, fract(leaf.w * 7.3)));
-          }
-        #endif`,
-      );
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        "#include <common>",
-        `#include <common>
-        varying vec4 vLeaf;
-        varying vec3 vTreeWorld;
-        uniform float treeBare;
-        uniform sampler2D barkMap;
-        float leafHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-        // Whether this point of a card is needle or leaf (and how light), or the gap
-        // between (-1).
-        float foliage(vec4 l) {
-          float kind = l.z;
-          if (kind < 0.5) return 1.0;
-          float u = clamp(l.x, 0.0, 1.0), v = l.y, av = abs(v);
-          if (kind < 1.5) {
-            // A spruce spray: a feather of side shoots, ragged at the edge.
-            // Broad from where it leaves the trunk (so the trunk is hidden), tapering out.
-            float env = mix(0.55, 1.0, smoothstep(0.0, 0.3, u)) * (1.0 - 0.85 * smoothstep(0.55, 1.0, u));
-            if (av > env) return -1.0;
-            float twig = fract(u * 13.0 - av * 2.6 + l.w * 3.0);
-            if (av > 0.08 && twig > 0.76) return -1.0;
-            float edge = leafHash(floor(vec2(u * 70.0, v * 14.0)) + l.w * 17.0);
-            if (av > env * 0.72 && edge < 0.35) return -1.0;
-            return 0.8 + 0.25 * edge + 0.2 * smoothstep(0.5, 1.0, av / env);
-          }
-          if (kind < 2.5) {
-            // Leaves: small ovals scattered thick over a rounded clump.
-            vec2 q = vec2(u * 2.0 - 1.0, v);
-            float r = length(q);
-            if (r > 1.0) return -1.0;
-            vec2 g = q * 5.5 + l.w * 7.0;
-            vec2 cell = floor(g);
-            float h = leafHash(cell);
-            vec2 f = fract(g) - 0.5 - (vec2(h, leafHash(cell + 3.1)) - 0.5) * 0.5;
-            if (length(f * vec2(1.0, 1.45)) > 0.5 || h < 0.08 + 0.55 * smoothstep(0.5, 1.0, r)) return -1.0;
-            return 0.75 + 0.5 * h;
-          }
-          if (kind < 3.5) {
-            // A pine's tuft: needles bursting from a point.
-            vec2 q = vec2(u * 2.0 - 1.0, v);
-            float r = length(q), a = atan(q.y, q.x);
-            float ray = abs(fract(a * 2.5 + l.w * 5.0) - 0.5) * 2.0;
-            float reach = 0.65 + 0.35 * leafHash(vec2(floor(a * 5.0 + l.w * 9.0), l.w));
-            if (r > reach * (1.0 - 0.6 * ray) + 0.12) return -1.0;
-            return 0.8 + 0.35 * r;
-          }
-          // A fern's frond: a stalk and its rows of leaflets.
-          float env = pow(sin(3.1416 * u), 0.7) * (1.0 - 0.35 * u);
-          if (av > env) return -1.0;
-          if (av > 0.08 && fract(u * 14.0 - av * 1.4) > 0.6) return -1.0;
-          return 0.85 + 0.3 * u;
-        }`,
-      )
-      .replace(
-        "#include <clipping_planes_fragment>",
-        `#include <clipping_planes_fragment>
-        float leafTone = foliage(vLeaf);
-        if (leafTone < 0.0) discard;
-        if (vLeaf.z > 1.5 && vLeaf.z < 2.5 && vLeaf.w < treeBare) discard;`,
-      )
-      .replace(
-        "#include <color_fragment>",
-        `#include <color_fragment>
-        diffuseColor.rgb *= leafTone;
-        if (vLeaf.z < 0.5) {
-          // Bark on the trunks, limbs, stumps: the photograph wrapped round from the sides.
-          vec3 Nw = normalize((vec4(vNormal, 0.0) * viewMatrix).xyz);
-          vec3 b = pow(abs(Nw), vec3(4.0));
-          b /= dot(b, vec3(1.0));
-          vec3 P = vTreeWorld * vec3(0.55, 0.16, 0.55);
-          vec3 bark = texture2D(barkMap, P.zy).rgb * b.x + texture2D(barkMap, P.xz * 2.0).rgb * b.y + texture2D(barkMap, P.xy).rgb * b.z;
-          diffuseColor.rgb *= 0.45 + 1.35 * dot(bark, vec3(0.3, 0.55, 0.15));
-        }`,
-      )
-      .replace(
-        "#include <normal_fragment_begin>",
-        `#include <normal_fragment_begin>
-        // Foliage is lit as its crown, from whichever side the card is seen.
-        if (vLeaf.z > 0.5) normal = normalize(vNormal);`,
-      );
-  };
-  material.customProgramCacheKey = () => "salmon-forest-v1";
+  const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.88, side: THREE.DoubleSide, emissive: 0x0a1307, emissiveIntensity: 1 });
+  const barkMap = photo("pine_bark_diff", true);
+  const leaf = attribute("leaf", "vec4");
+  const sway = attribute("sway", "float");
+  const U = treeUniforms;
+  // The crowns sway in the wind (more in rain and storm).
+  material.positionNode = Fn(() => {
+    const phase = dot(positionLocal.xz, vec2(0.043, 0.061));
+    const push = vec2(sin(U.treeTime.mul(1.3).add(phase)), cos(U.treeTime.mul(1.05).add(phase.mul(1.7)))).mul(sway.mul(U.treeWind));
+    return positionLocal.add(vec3(push.x, 0, push.y));
+  })();
+  const worldNormal = varying(normalize(modelNormalMatrix.mul(normalGeometry)));
+  const tone = foliageTone(leaf);
+  // Cut out of the cards: the gaps between needles and leaves, and the birches' leaves as
+  // they fall.
+  material.maskNode = tone.greaterThanEqual(0).and(leaf.z.greaterThan(1.5).and(leaf.z.lessThan(2.5)).and(leaf.w.lessThan(U.treeBare)).not());
+  material.colorNode = Fn(() => {
+    const kind = leaf.z;
+    const color = attribute("color", "vec3").toVar();
+    If(kind.greaterThan(1.5).and(kind.lessThan(2.5)), () => {
+      // Birch and bilberry in autumn: yellow, some of it rust.
+      const fall = mix(vec3(0.6, 0.46, 0.08), vec3(0.5, 0.2, 0.05), step(0.78, leaf.w));
+      color.assign(mix(color, fall, U.treeAutumn.mul(smoothstep(0, 0.5, leaf.w.add(0.25)))));
+    })
+      .ElseIf(kind.greaterThan(3.5), () => {
+        color.assign(mix(color, vec3(0.32, 0.2, 0.09), max(U.treeAutumn.mul(0.8), U.treeBare)));
+      })
+      .ElseIf(kind.greaterThan(0.5), () => {
+        // Snow lies on the tops of the sprays and tufts.
+        color.assign(mix(color, vec3(0.85, 0.88, 0.92), U.treeSnow.mul(smoothstep(0.15, 0.6, worldNormal.y)).mul(step(0.3, fract(leaf.w.mul(7.3))))));
+      });
+    color.mulAssign(tone.max(0));
+    If(kind.lessThan(0.5), () => {
+      // Bark on the trunks, limbs, stumps: the photograph wrapped round from the sides.
+      const Nw = normalize(worldNormal);
+      const b = pow(abs(Nw), vec3(4));
+      const w = b.div(dot(b, vec3(1)));
+      const P = positionWorld.mul(vec3(0.55, 0.16, 0.55));
+      const bark = texture(barkMap, P.zy)
+        .rgb.mul(w.x)
+        .add(texture(barkMap, P.xz.mul(2)).rgb.mul(w.y))
+        .add(texture(barkMap, P.xy).rgb.mul(w.z));
+      color.mulAssign(dot(bark, vec3(0.3, 0.55, 0.15)).mul(1.35).add(0.45));
+    });
+    return color;
+  })();
+  // Foliage is lit as its crown, from whichever side the card is seen; a trunk as itself.
+  const viewNormal = normalize(cameraViewMatrix.mul(vec4(worldNormal, 0)).xyz);
+  material.normalNode = select(leaf.z.greaterThan(0.5), viewNormal, viewNormal.mul(faceDirection));
   return material;
 }
 let shared = null;

@@ -14,20 +14,21 @@
     1
   ],
   "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
-  "when": "2026-09-25T17:25:29.910Z",
+  "when": "2026-09-25T18:16:53.050Z",
   "gpu": {
-    "median": 19.29,
-    "p90": 20.05,
-    "n": 80
+    "median": 19.12,
+    "p90": 21.15,
+    "n": 79
   },
   "cpu": {
-    "median": 2.2,
-    "p90": 2.5,
+    "median": 1.9,
+    "p90": 2.2,
     "n": 80
   },
-  "calls": 192,
-  "triangles": 2871070,
+  "calls": 164,
+  "triangles": 2816919,
   "programs": 146,
   "textures": 37,
-  "geometries": 310
+  "geometries": 286,
+  "frame": 11.52
 }

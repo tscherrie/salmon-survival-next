@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { waterLitShader } from "../../riverscape/src/water.js";
+import { waterLit } from "./render/water.js";
+import { dot, floor, fract, mix, positionWorld, sin, vec2, vec3 } from "three/tsl";
 import { SolidBatch } from "./flora.js";
 
 // The hunters that come from above: the kingfisher that drops beak-first into the brook,
@@ -10,33 +11,22 @@ import { SolidBatch } from "./flora.js";
 const vec = (x, y, z) => new THREE.Vector3(x, y, z);
 
 export function creatureMaterial() {
-  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75 });
-  material.onBeforeCompile = (shader) => {
-    waterLitShader(shader);
-    // Fur and feathers: fine streaks laid along the body, a little lighter at the tips.
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        "#include <common>",
-        `#include <common>
-        float furHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-        float furNoise(vec2 p) {
-          vec2 i = floor(p), f = fract(p);
-          f = f * f * (3.0 - 2.0 * f);
-          return mix(mix(furHash(i), furHash(i + vec2(1, 0)), f.x), mix(furHash(i + vec2(0, 1)), furHash(i + vec2(1, 1)), f.x), f.y);
-        }`,
-      )
-      .replace(
-        "#include <color_fragment>",
-        `#include <color_fragment>
-        {
-          vec3 P = vWaterPosition;
-          float streak = furNoise(vec2(P.x * 1.6 + P.z * 0.4, P.y * 9.0 + P.z * 6.0)) * 0.6 + furNoise(P.xz * 7.0 + P.y * 3.0) * 0.4;
-          diffuseColor.rgb *= 0.78 + 0.42 * streak;
-        }`,
-      );
+  // Fur and feathers: fine streaks laid along the body, a little lighter at the tips (over
+  // the vertex colours, which the material multiplies in).
+  const material = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.75 });
+  const hash = (p) => fract(sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453));
+  const noise = (p) => {
+    const i = floor(p),
+      f = fract(p);
+    const w = f.mul(f).mul(f.mul(-2).add(3));
+    return mix(mix(hash(i), hash(i.add(vec2(1, 0))), w.x), mix(hash(i.add(vec2(0, 1))), hash(i.add(vec2(1, 1))), w.x), w.y);
   };
-  material.customProgramCacheKey = () => "salmon-creature-v2";
-  return material;
+  const P = positionWorld;
+  const streak = noise(vec2(P.x.mul(1.6).add(P.z.mul(0.4)), P.y.mul(9).add(P.z.mul(6))))
+    .mul(0.6)
+    .add(noise(P.xz.mul(7).add(P.y.mul(3))).mul(0.4));
+  material.colorNode = vec3(streak.mul(0.42).add(0.78));
+  return waterLit(material);
 }
 
 const part = {

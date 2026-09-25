@@ -19,7 +19,7 @@ const option = (name) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : null;
 };
-const set = args.find((a, i) => !a.startsWith("--") && !args[i - 1]?.match(/^--(only|port)$/));
+const set = args.find((a, i) => !a.startsWith("--") && !args[i - 1]?.match(/^--(only|port|quality)$/));
 if (!set) {
   console.error("usage: node tools/shots.mjs <set> [--only a,b] [--port 8123] [--headed] [--webgl]");
   process.exit(1);
@@ -54,6 +54,9 @@ const profile = await mkdtemp(join(tmpdir(), "salmon-shots-"));
 const query = new URLSearchParams({ shots: set });
 if (only) query.set("only", only);
 if (args.includes("--webgl")) query.set("webgl", "");
+if (args.includes("--stages")) query.set("stages", "");
+if (args.includes("--smoke")) query.set("smoke", "");
+if (option("quality")) query.set("q", option("quality"));
 const url = `http://localhost:${port}/?${query}`;
 const chrome = spawn(
   CHROME,

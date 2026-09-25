@@ -1,6 +1,8 @@
 import * as THREE from "three";
-import { rockGeometry } from "../../riverscape/src/environment.js";
-import { waterLitShader } from "../../riverscape/src/water.js";
+import { rockGeometry } from "./render/geometry.js";
+import { waterLit } from "./render/water.js";
+import { placeOwnInstances } from "./render/instancing.js";
+import { Fn, abs, dot, floor, fract, mix, normalGeometry, normalize, positionGeometry, property, sin, smoothstep, step, uniform, varying, vec3, vec4 } from "three/tsl";
 import { bedDetail, level, locate } from "./course.js";
 
 // The gravel as a small fish sees it. To a salmon two centimetres long the pebbles of the
@@ -42,103 +44,70 @@ function hash(i, j, k) {
   return h - Math.floor(h);
 }
 
-// The fade toward the layer's edge, for the stone's colour pass and its shadow alike.
-const FADE_GLSL = /* glsl */ `
-  #ifdef USE_INSTANCING
-  {
-    // Toward the edge of the layer a stone sinks into the bed and shrinks away.
-    vec3 centre = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-    float away = distance(centre.xz, pebbleFade.xy);
-    float keep = 1.0 - smoothstep(pebbleFade.z, pebbleFade.w, away);
-    transformed *= keep;
-    transformed.y -= (1.0 - keep) * 0.8;
-  }
-  #endif
-`;
-function pebbleDepthMaterial(fade) {
-  const material = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.pebbleFade = fade;
-    shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nuniform vec4 pebbleFade;")
-      .replace("#include <begin_vertex>", `#include <begin_vertex>\n${FADE_GLSL}`);
-  };
-  material.customProgramCacheKey = () => "salmon-pebbles-depth-v1";
-  return material;
-}
+const pebbleHash = (p) => fract(sin(dot(p, vec3(127.1, 311.7, 74.7))).mul(43758.5453));
+const pebbleNoise = (p) => {
+  const i = floor(p),
+    f = fract(p);
+  const u = f.mul(f).mul(f.mul(-2).add(3));
+  const at = (x, y, z) => pebbleHash(i.add(vec3(x, y, z)));
+  return mix(mix(mix(at(0, 0, 0), at(1, 0, 0), u.x), mix(at(0, 1, 0), at(1, 1, 0), u.x), u.y), mix(mix(at(0, 0, 1), at(1, 0, 1), u.x), mix(at(0, 1, 1), at(1, 1, 1), u.x), u.y), u.z);
+};
 
-function pebbleMaterial(fade) {
-  const material = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0 });
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.pebbleFade = fade;
-    shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nvarying vec3 vStone; varying float vTop;\nuniform vec4 pebbleFade;")
-      .replace("#include <begin_vertex>", `#include <begin_vertex>\nvStone = position * 3.0; vTop = normal.y;\n${FADE_GLSL}`);
-    waterLitShader(shader);
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        "#include <common>",
-        `#include <common>
-        varying vec3 vStone;
-        varying float vTop;
-        float pebbleHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
-        float pebbleNoise(vec3 p) {
-          vec3 i = floor(p), f = fract(p);
-          f = f * f * (3.0 - 2.0 * f);
-          return mix(mix(mix(pebbleHash(i), pebbleHash(i + vec3(1, 0, 0)), f.x), mix(pebbleHash(i + vec3(0, 1, 0)), pebbleHash(i + vec3(1, 1, 0)), f.x), f.y),
-            mix(mix(pebbleHash(i + vec3(0, 0, 1)), pebbleHash(i + vec3(1, 0, 1)), f.x), mix(pebbleHash(i + vec3(0, 1, 1)), pebbleHash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
-        }
-        float gGrain = 0.0;`,
-      )
-      .replace(
-        "#include <color_fragment>",
-        `#include <color_fragment>
-        {
-          // The grain of the stone: fine crystals of three colours, dark flecks of mica, and
-          // a quartz vein now and then.
-          float grain = pebbleNoise(vStone * 9.0) * 0.6 + pebbleNoise(vStone * 27.0) * 0.4;
-          float crystals = step(0.74, pebbleNoise(vStone * 41.0 + 3.0));
-          float dark = step(0.78, pebbleNoise(vStone * 53.0 + 11.0));
-          vec3 c = diffuseColor.rgb * (0.78 + 0.34 * grain);
-          c = mix(c, c * 1.4 + 0.03, crystals * 0.45);
-          c = mix(c, c * 0.25, dark * 0.7);
-          // Now and then a straight band of quartz right through a stone.
-          float band = abs(dot(vStone, normalize(vec3(0.3, 1.0, 0.5))) - (pebbleHash(floor(vStone * 0.05 + 0.5)) - 0.5) * 2.0);
-          float vein = (1.0 - smoothstep(0.02, 0.06, band)) * step(0.8, pebbleHash(floor(vStone * 0.05 + 0.5) + 3.0));
-          c = mix(c, vec3(0.62, 0.6, 0.55), vein * 0.5);
-          // A thin brown film of diatoms over everything, a little thicker on top; a fine
-          // green fur of algae only in the brightest places.
-          float patchy = pebbleNoise(vStone * 4.0) * 0.7 + pebbleNoise(vStone * 13.0) * 0.3;
-          float top = smoothstep(0.0, 0.8, vTop + (patchy - 0.5) * 0.5);
-          c = mix(c, c * vec3(0.66, 0.6, 0.42), 0.3 + top * 0.35);
-          c = mix(c, c * vec3(0.55, 0.7, 0.35), smoothstep(0.66, 0.85, patchy) * top * 0.35);
-          diffuseColor.rgb = c;
-          gGrain = grain;
-        }`,
-      )
-      .replace(
-        "#include <roughnessmap_fragment>",
-        `#include <roughnessmap_fragment>
-        roughnessFactor = 0.28 + 0.3 * gGrain;`,
-      );
-  };
-  material.customProgramCacheKey = () => "salmon-pebbles-v2";
+// A stone's material, for one mesh (the mesh places its own stones: toward the edge of the
+// layer each sinks into the bed and shrinks away, in its own frame, before it is placed --
+// in its colour pass and its shadow alike).
+function pebbleMaterial(fade, mesh) {
+  const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.55, metalness: 0 });
+  placeOwnInstances(mesh, material, (p, matrix) => {
+    const centre = matrix.mul(vec4(0, 0, 0, 1)).xyz;
+    const away = centre.xz.sub(fade.xy).length();
+    const keep = smoothstep(fade.z, fade.w, away).oneMinus();
+    return p.mul(keep).sub(vec3(0, keep.oneMinus().mul(0.8), 0));
+  });
+  const stone = varying(positionGeometry.mul(3));
+  const top = varying(normalGeometry.y);
+  const grainOut = property("float", "pebbleGrain");
+  material.colorNode = Fn(() => {
+    // The grain of the stone: fine crystals of three colours, dark flecks of mica, and a
+    // quartz vein now and then.
+    const grain = pebbleNoise(stone.mul(9)).mul(0.6).add(pebbleNoise(stone.mul(27)).mul(0.4));
+    const crystals = step(0.74, pebbleNoise(stone.mul(41).add(3)));
+    const dark = step(0.78, pebbleNoise(stone.mul(53).add(11)));
+    const c = vec3(1).mul(grain.mul(0.34).add(0.78)).toVar();
+    c.assign(mix(c, c.mul(1.4).add(0.03), crystals.mul(0.45)));
+    c.assign(mix(c, c.mul(0.25), dark.mul(0.7)));
+    // Now and then a straight band of quartz right through a stone.
+    const cell = floor(stone.mul(0.05).add(0.5));
+    const band = abs(dot(stone, normalize(vec3(0.3, 1, 0.5))).sub(pebbleHash(cell).sub(0.5).mul(2)));
+    const vein = smoothstep(0.02, 0.06, band).oneMinus().mul(step(0.8, pebbleHash(cell.add(3))));
+    c.assign(mix(c, vec3(0.62, 0.6, 0.55), vein.mul(0.5)));
+    // A thin brown film of diatoms over everything, a little thicker on top; a fine green
+    // fur of algae only in the brightest places.
+    const patchy = pebbleNoise(stone.mul(4)).mul(0.7).add(pebbleNoise(stone.mul(13)).mul(0.3));
+    const onTop = smoothstep(0, 0.8, top.add(patchy.sub(0.5).mul(0.5)));
+    c.assign(mix(c, c.mul(vec3(0.66, 0.6, 0.42)), onTop.mul(0.35).add(0.3)));
+    c.assign(mix(c, c.mul(vec3(0.55, 0.7, 0.35)), smoothstep(0.66, 0.85, patchy).mul(onTop).mul(0.35)));
+    grainOut.assign(grain);
+    // (Each stone's own colour, from setColorAt, is laid on by the renderer.)
+    return c;
+  })();
+  material.roughnessNode = grainOut.mul(0.3).add(0.28);
+  waterLit(material);
   return material;
 }
 
 export function createPebbles(scene) {
-  const fineFade = { value: new THREE.Vector4(0, 0, 1e5, 1e5) };
-  const coarseFade = { value: new THREE.Vector4(0, 0, 1e5, 1e5) };
+  const fineFade = uniform(new THREE.Vector4(0, 0, 1e5, 1e5));
+  const coarseFade = uniform(new THREE.Vector4(0, 0, 1e5, 1e5));
   const makeLayer = (name, detail, max, fade) => {
-    const material = pebbleMaterial(fade);
-    const depth = pebbleDepthMaterial(fade);
     const shapes = [rockGeometry(2.1, detail, 1), rockGeometry(5.7, detail, 0.7), rockGeometry(9.3, detail, 1)];
     return shapes.map((shape, i) => {
-      const mesh = new THREE.InstancedMesh(shape, material, max);
+      const mesh = new THREE.InstancedMesh(shape, undefined, max);
+      mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(max * 3).fill(1), 3);
+      mesh.material = pebbleMaterial(fade, mesh);
       mesh.count = 0;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      mesh.customDepthMaterial = depth;
       mesh.frustumCulled = false;
       mesh.name = `Gravel ${name} ${i}`;
       scene.add(mesh);

@@ -1,6 +1,40 @@
 import * as THREE from "three";
-import { randomGenerator } from "../../riverscape/src/math.js";
-import { waterLitShader } from "../../riverscape/src/water.js";
+import { randomGenerator } from "./render/geometry.js";
+import { waterLit } from "./render/water.js";
+import { placeOwnInstances } from "./render/instancing.js";
+import { PointCloud, perPoint } from "./materials.js";
+import { waterBetween } from "./render/fog.js";
+import {
+  Fn,
+  If,
+  abs,
+  atan,
+  attribute,
+  cameraPosition,
+  cos,
+  diffuseColor,
+  dot,
+  exp,
+  float,
+  fract,
+  length,
+  max,
+  mix,
+  normalView,
+  normalize,
+  positionGeometry,
+  positionViewDirection,
+  positionWorld,
+  pow,
+  sin,
+  smoothstep,
+  uniform,
+  uv,
+  varying,
+  vec2,
+  vec3,
+  vec4,
+} from "three/tsl";
 import { COATS, MODEL_LENGTH, createFishMesh } from "./anatomy.js";
 import { FALLS, S, bed, current, frame, level, locate, place, regionWeights, section } from "./course.js";
 import { bearLegsGeometry, bearPawGeometry, creatureMaterial, heronHeadGeometry, heronLegsGeometry, kingfisherGeometry } from "./creatures.js";
@@ -11,7 +45,7 @@ import { createSchool } from "./school.js";
 import { createBrawls } from "./brawl.js";
 import { profile as prof } from "./profile.js";
 import { phaseOf } from "./salmon.js";
-import { dressFoodShader, foodGeometry } from "./food-shapes.js";
+import { foodGeometry } from "./food-shapes.js";
 import { mode } from "./vegan.js";
 
 // Everything else alive in the river and the sea, and what it means to the salmon:
@@ -88,32 +122,39 @@ const MIX = {
 function createFood(scene, { count = 240 } = {}) {
   const random = randomGenerator(51377);
   const range = (a, b) => a + (b - a) * random();
-  const glow = { value: 0.25 };
-  const pulseTime = { value: 0 };
-  const material = new THREE.MeshStandardMaterial({ roughness: 0.45 });
-  material.onBeforeCompile = (shader) => {
-    waterLitShader(shader);
-    shader.uniforms.foodGlow = glow;
-    shader.uniforms.foodTime = pulseTime;
-    dressFoodShader(shader);
-    shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nattribute float edible;\nvarying float vEdible;")
-      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvEdible = edible;");
-    shader.fragmentShader = shader.fragmentShader
-      .replace("#include <common>", "#include <common>\nuniform float foodGlow;\nuniform float foodTime;\nvarying float vEdible;")
-      .replace(
-        "#include <emissivemap_fragment>",
-        `#include <emissivemap_fragment>
-        // A living thing in the drift catches the eye: a faint glow of its own colour, and
-        // a rim that lights up against the water behind it. What this fish can swallow
-        // glows warm and gently pulses, so food is food at a glance.
-        float rim = pow(1.0 - saturate(dot(normalize(vNormal), normalize(vViewPosition))), 2.0);
-        float pulse = 0.75 + 0.25 * sin(foodTime * 5.0);
-        totalEmissiveRadiance += diffuseColor.rgb * foodGlow * (0.6 + 1.6 * rim) * (0.5 + 1.3 * vEdible);
-        totalEmissiveRadiance += vec3(1.0, 0.78, 0.38) * vEdible * (0.35 + 1.1 * rim) * pulse * foodGlow;`,
-      );
+  const glow = uniform(0.25);
+  const pulseTime = uniform(0);
+  // Each kind of food its own mesh, and each mesh its own material: the shader places the
+  // copies itself (a morsel wriggles in its own frame before it is placed).
+  const foodMaterial = (mesh, edible) => {
+    const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.45 });
+    const paint = attribute("paint", "vec4");
+    const shade = attribute("shade", "float");
+    const motion = attribute("motion", "vec2");
+    const { colour } = placeOwnInstances(
+      mesh,
+      material,
+      (p, matrix) => {
+        const ph = dot(matrix.mul(vec4(0, 0, 0, 1)).xyz, vec3(1.7, 0.9, 2.3));
+        const t = pulseTime.mul(motion.y).add(p.x.mul(6)).add(ph);
+        return p.add(vec3(0, sin(t).mul(motion.x), cos(t.mul(0.73).add(1.3)).mul(motion.x).mul(0.6)));
+      },
+      { ownColour: true },
+    );
+    // The paint and shade laid on the kind's colour.
+    material.colorNode = mix(colour.mul(shade), paint.rgb, paint.a);
+    // A living thing in the drift catches the eye: a faint glow of its own colour, and a rim
+    // that lights up against the water behind it. What this fish can swallow glows warm and
+    // gently pulses, so food is food at a glance.
+    const rim = pow(dot(normalView, positionViewDirection).clamp(0, 1).oneMinus(), 2);
+    const pulse = sin(pulseTime.mul(5)).mul(0.25).add(0.75);
+    material.emissiveNode = diffuseColor.rgb
+      .mul(glow)
+      .mul(rim.mul(1.6).add(0.6))
+      .mul(edible.mul(1.3).add(0.5))
+      .add(vec3(1, 0.78, 0.38).mul(edible).mul(rim.mul(1.1).add(0.35)).mul(pulse).mul(glow));
+    return waterLit(material);
   };
-  material.customProgramCacheKey = () => "salmon-food-v3";
   const meshes = {};
   const edibleFlags = {};
   for (const [name, type] of Object.entries(FOODS)) {
@@ -121,7 +162,9 @@ function createFood(scene, { count = 240 } = {}) {
     edibleFlags[name] = new THREE.InstancedBufferAttribute(new Float32Array(count), 1);
     edibleFlags[name].setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute("edible", edibleFlags[name]);
-    const mesh = new THREE.InstancedMesh(geometry, material, count);
+    const mesh = new THREE.InstancedMesh(geometry, undefined, count);
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(count * 3).fill(1), 3);
+    mesh.material = foodMaterial(mesh, attribute("edible", "float"));
     mesh.count = 0;
     mesh.frustumCulled = false;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -138,44 +181,23 @@ function createFood(scene, { count = 240 } = {}) {
   haloGeometry.setAttribute("position", new THREE.BufferAttribute(haloPositions, 3));
   haloGeometry.setAttribute("size", new THREE.BufferAttribute(haloSizes, 1));
   haloGeometry.setAttribute("color", new THREE.BufferAttribute(haloColors, 3));
-  const haloMaterial = new THREE.ShaderMaterial({
-    uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), scale: { value: 400 }, light: { value: 1 } },
-    fog: true,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    vertexShader: /* glsl */ `
-      #include <common>
-      #include <fog_pars_vertex>
-      attribute float size;
-      attribute vec3 color;
-      uniform float scale;
-      varying vec3 vColor;
-      void main() {
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = clamp(size * scale / max(-mvPosition.z, 0.05), 2.0, 110.0);
-        vColor = color;
-        #include <fog_vertex>
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      #include <common>
-      #include <fog_pars_fragment>
-      uniform float light;
-      varying vec3 vColor;
-      void main() {
-        float r = length(gl_PointCoord - 0.5) * 2.0;
-        float a = exp(-r * r * 3.5) * 0.275;
-        if (a < 0.004) discard;
-        // Fogged as a colour first, then weighted, so the haze is not added to the whole square.
-        gl_FragColor = vec4(vColor * light, 1.0);
-        #include <fog_fragment>
-        gl_FragColor.rgb = max(gl_FragColor.rgb - underwaterInscatter(fogDirection) * (1.0 - fogTransmit), 0.0) * a;
-      }
-    `,
-  });
-  const halos = new THREE.Points(haloGeometry, haloMaterial);
+  const haloLight = uniform(1);
+  const haloMaterial = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, sizeAttenuation: true });
+  haloMaterial.positionNode = perPoint(haloGeometry, "position");
+  haloMaterial.scaleNode = perPoint(haloGeometry, "size");
+  {
+    const r = length(uv().sub(0.5)).mul(2);
+    const a = exp(r.mul(r).mul(-3.5)).mul(0.275);
+    // Fogged as a colour first, then weighted, so the haze is not added to the whole square:
+    // only what gets through the water of the halo's own colour shows.
+    const ray = positionWorld.sub(cameraPosition);
+    const through = waterBetween(perPoint(haloGeometry, "color").mul(haloLight), length(ray), normalize(ray)).sub(waterBetween(vec3(0), length(ray), normalize(ray)));
+    haloMaterial.colorNode = max(through, vec3(0)).mul(a);
+    haloMaterial.opacityNode = a.greaterThan(0.004).select(1, 0);
+    haloMaterial.alphaTest = 0.5;
+  }
+  haloMaterial.uniforms = { scale: { value: 1 }, light: haloLight };
+  const halos = new PointCloud(haloGeometry, haloMaterial);
   halos.frustumCulled = false;
   halos.name = "Food halos";
   scene.add(halos);
@@ -186,37 +208,25 @@ function createFood(scene, { count = 240 } = {}) {
   const markGeometry = new THREE.BufferGeometry();
   const markPosition = new Float32Array(3);
   markGeometry.setAttribute("position", new THREE.BufferAttribute(markPosition, 3));
-  const markMaterial = new THREE.ShaderMaterial({
-    uniforms: { size: { value: 0 }, scale: { value: 400 }, time: { value: 0 }, strength: { value: 0 }, ready: { value: 0 } },
-    transparent: true,
-    depthWrite: false,
-    depthTest: false,
-    blending: THREE.AdditiveBlending,
-    vertexShader: /* glsl */ `
-      uniform float size, scale;
-      void main() {
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = clamp(size * scale / max(-mvPosition.z, 0.05), 8.0, 64.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform float time, strength, ready;
-      void main() {
-        vec2 p = gl_PointCoord - 0.5;
-        float r = length(p) * 2.0;
-        float glint = exp(-r * r * 10.0) * 0.16 * strength;
-        float phase = fract(time * 0.85);
-        float eased = phase * phase * (3.0 - 2.0 * phase);
-        float radius = mix(0.92, 0.3, eased);
-        float line = exp(-pow((r - radius) * 20.0, 2.0)) * (1.0 - phase) * ready * 0.5;
-        float alpha = glint + line;
-        if (alpha < 0.004) discard;
-        gl_FragColor = vec4(vec3(1.0, 0.93, 0.76) * alpha, 1.0);
-      }
-    `,
-  });
-  const mark = new THREE.Points(markGeometry, markMaterial);
+  const markUniforms = { size: uniform(0), scale: { value: 1 }, time: uniform(0), strength: uniform(0), ready: uniform(0) };
+  const markMaterial = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, depthTest: false, fog: false, blending: THREE.AdditiveBlending, sizeAttenuation: true });
+  markMaterial.positionNode = perPoint(markGeometry, "position");
+  markMaterial.scaleNode = vec2(markUniforms.size);
+  {
+    const p = uv().sub(0.5);
+    const r = length(p).mul(2);
+    const glint = exp(r.mul(r).mul(-10)).mul(0.16).mul(markUniforms.strength);
+    const phase = fract(markUniforms.time.mul(0.85));
+    const eased = phase.mul(phase).mul(phase.mul(-2).add(3));
+    const radius = mix(0.92, 0.3, eased);
+    const line = exp(pow(r.sub(radius).mul(20), 2).negate()).mul(phase.oneMinus()).mul(markUniforms.ready).mul(0.5);
+    const alpha = glint.add(line);
+    markMaterial.colorNode = vec3(1, 0.93, 0.76).mul(alpha);
+    markMaterial.opacityNode = alpha.greaterThan(0.004).select(1, 0);
+    markMaterial.alphaTest = 0.5;
+  }
+  markMaterial.uniforms = markUniforms;
+  const mark = new PointCloud(markGeometry, markMaterial);
   mark.frustumCulled = false;
   mark.renderOrder = 5;
   mark.name = "Food mark";
@@ -1385,40 +1395,18 @@ function createMotes(scene, { count = 2200 } = {}) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("size", new THREE.BufferAttribute(sizes, 1));
-  const material = new THREE.ShaderMaterial({
-    uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), scale: { value: 400 }, light: { value: 1 }, grain: { value: 0.02 } },
-    fog: true,
-    transparent: true,
-    depthWrite: false,
-    vertexShader: /* glsl */ `
-      #include <common>
-      #include <fog_pars_vertex>
-      attribute float size;
-      uniform float scale;
-      uniform float grain;
-      varying float vNear;
-      void main() {
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        gl_Position = projectionMatrix * mvPosition;
-        gl_PointSize = clamp(size * grain * scale / max(-mvPosition.z, 0.02), 1.0, 7.0);
-        vNear = smoothstep(grain * 4.0, grain * 16.0, -mvPosition.z);
-        #include <fog_vertex>
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      #include <common>
-      #include <fog_pars_fragment>
-      uniform float light;
-      varying float vNear;
-      void main() {
-        vec2 q = gl_PointCoord - 0.5;
-        float a = smoothstep(0.5, 0.15, length(q)) * 0.32 * vNear;
-        gl_FragColor = vec4(vec3(0.78, 0.8, 0.7) * light, a);
-        #include <fog_fragment>
-      }
-    `,
-  });
-  const points = new THREE.Points(geometry, material);
+  const light = uniform(1),
+    grain = uniform(0.02);
+  const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, sizeAttenuation: true });
+  material.positionNode = perPoint(geometry, "position");
+  material.scaleNode = perPoint(geometry, "size").mul(grain);
+  {
+    const near = smoothstep(grain.mul(4), grain.mul(16), length(positionWorld.sub(cameraPosition)));
+    material.colorNode = vec3(0.78, 0.8, 0.7).mul(light);
+    material.opacityNode = smoothstep(0.5, 0.15, length(uv().sub(0.5))).mul(0.32).mul(near);
+  }
+  material.uniforms = { scale: { value: 1 }, light, grain };
+  const points = new PointCloud(geometry, material);
   points.frustumCulled = false;
   points.name = "Motes";
   scene.add(points);
@@ -1541,65 +1529,64 @@ function createJellies(scene, { count = 36 } = {}) {
   phases.setUsage(THREE.DynamicDrawUsage);
   geometry.setAttribute("aPulse", phases);
 
-  const material = new THREE.MeshStandardMaterial({ color: 0xdfeff2, roughness: 0.25, transparent: true, depthWrite: false, side: THREE.DoubleSide });
-  material.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        "#include <common>",
-        `#include <common>
-        attribute vec2 jelly;
-        attribute float aPulse;
-        varying vec2 vJelly;
-        varying vec3 vJellyPoint;`,
-      )
-      .replace(
-        "#include <begin_vertex>",
-        `#include <begin_vertex>
-        // The bell contracts from the margin in, then relaxes; what hangs from it sways.
-        float beat = pow(max(0.0, sin(aPulse)), 3.0);
-        if (jelly.x < 0.5) {
-          float squeeze = 1.0 - 0.2 * beat * jelly.y;
-          transformed.xz *= squeeze;
-          transformed.y += 0.06 * beat * jelly.y;
-        } else {
-          transformed.xz *= 1.0 - 0.15 * beat;
-          float t = jelly.y;
-          transformed.x += sin(aPulse * 0.5 + t * 4.0 + position.z * 3.0) * 0.12 * t;
-          transformed.z += cos(aPulse * 0.4 + t * 3.0 + position.x * 3.0) * 0.12 * t;
-        }
-        vJelly = jelly;
-        vJellyPoint = position;`,
-      );
-    waterLitShader(shader);
-    shader.fragmentShader = shader.fragmentShader
-      .replace("#include <common>", "#include <common>\nvarying vec2 vJelly;\nvarying vec3 vJellyPoint;")
-      .replace(
-        "#include <color_fragment>",
-        `#include <color_fragment>
-        float rim = pow(1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition))), 2.0);
-        if (vJelly.x < 0.5) {
-          // Four horseshoes of pink seen through the top of the bell.
-          float a = atan(vJellyPoint.z, vJellyPoint.x);
-          float r = length(vJellyPoint.xz);
-          float lobes = pow(abs(cos(a * 2.0)), 3.0);
-          float ring = exp(-pow((r - 0.28 - 0.06 * lobes) / 0.05, 2.0)) * smoothstep(0.1, 0.25, r);
-          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95, 0.55, 0.7), ring * 0.8);
-          diffuseColor.a = 0.12 + 0.55 * rim + ring * 0.45;
-        } else if (vJelly.x < 1.5) {
-          diffuseColor.a = 0.35 * (1.0 - vJelly.y * 0.7);
-        } else {
-          diffuseColor.rgb = vec3(0.92, 0.8, 0.86);
-          diffuseColor.a = 0.3 * (1.0 - vJelly.y * 0.8);
-        }`,
-      )
-      .replace(
-        "#include <emissivemap_fragment>",
-        `#include <emissivemap_fragment>
-        totalEmissiveRadiance += diffuseColor.rgb * 0.18 * (0.5 + rim);`,
-      );
-  };
-  material.customProgramCacheKey = () => "salmon-jelly-v1";
+  const material = new THREE.MeshStandardNodeMaterial({ color: 0xdfeff2, roughness: 0.25, transparent: true, depthWrite: false, side: THREE.DoubleSide });
   const mesh = new THREE.InstancedMesh(geometry, material, count);
+  {
+    const jelly = attribute("jelly", "vec2");
+    const pulse = attribute("aPulse", "float");
+    // The bell contracts from the margin in, then relaxes; what hangs from it sways.
+    placeOwnInstances(
+      mesh,
+      material,
+      (p) => {
+        const beat = pow(max(0, sin(pulse)), 3);
+        const q = p.toVar();
+        If(jelly.x.lessThan(0.5), () => {
+          const squeeze = beat.mul(jelly.y).mul(-0.2).add(1);
+          q.assign(vec3(q.x.mul(squeeze), q.y.add(beat.mul(jelly.y).mul(0.06)), q.z.mul(squeeze)));
+        }).Else(() => {
+          const t = jelly.y;
+          const k = beat.mul(-0.15).add(1);
+          q.assign(
+            vec3(
+              q.x.mul(k).add(sin(pulse.mul(0.5).add(t.mul(4)).add(p.z.mul(3))).mul(0.12).mul(t)),
+              q.y,
+              q.z.mul(k).add(cos(pulse.mul(0.4).add(t.mul(3)).add(p.x.mul(3))).mul(0.12).mul(t)),
+            ),
+          );
+        });
+        return q;
+      },
+      { doubleSided: true },
+    );
+    const point = varying(positionGeometry);
+    const rim = pow(abs(dot(normalView, positionViewDirection)).oneMinus(), 2);
+    const shade = Fn(() => {
+      const color = vec3(0.874, 0.937, 0.949).toVar();
+      const alpha = float(1).toVar();
+      If(jelly.x.lessThan(0.5), () => {
+        // Four horseshoes of pink seen through the top of the bell.
+        const a = atan(point.z, point.x);
+        const r = length(point.xz);
+        const lobes = pow(abs(cos(a.mul(2))), 3);
+        const ring = exp(pow(r.sub(0.28).sub(lobes.mul(0.06)).div(0.05), 2).negate()).mul(smoothstep(0.1, 0.25, r));
+        color.assign(mix(color, vec3(0.95, 0.55, 0.7), ring.mul(0.8)));
+        alpha.assign(rim.mul(0.55).add(0.12).add(ring.mul(0.45)));
+      })
+        .ElseIf(jelly.x.lessThan(1.5), () => {
+          alpha.assign(jelly.y.mul(-0.7).add(1).mul(0.35));
+        })
+        .Else(() => {
+          color.assign(vec3(0.92, 0.8, 0.86));
+          alpha.assign(jelly.y.mul(-0.8).add(1).mul(0.3));
+        });
+      return vec4(color, alpha);
+    })();
+    material.colorNode = shade.rgb;
+    material.opacityNode = shade.a;
+    material.emissiveNode = diffuseColor.rgb.mul(0.18).mul(rim.add(0.5));
+    waterLit(material);
+  }
   mesh.frustumCulled = false;
   mesh.name = "Moon jellies";
   mesh.renderOrder = 1;
@@ -1680,13 +1667,10 @@ function createDebris(scene, { count = 120 } = {}) {
   outline.quadraticCurveTo(0.3, 0.3, 1, 0);
   outline.quadraticCurveTo(0.3, -0.3, 0, 0);
   const geometry = new THREE.ShapeGeometry(outline, 5).rotateX(-Math.PI / 2).translate(-0.5, 0, 0);
-  const material = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.75 });
-  material.onBeforeCompile = (shader) => {
-    waterLitShader(shader);
-    // Thin leaves glow with the light through them.
-    shader.fragmentShader = shader.fragmentShader.replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * 0.18;");
-  };
-  material.customProgramCacheKey = () => "salmon-leaf-v2";
+  const material = new THREE.MeshStandardNodeMaterial({ side: THREE.DoubleSide, roughness: 0.75 });
+  // Thin leaves glow with the light through them.
+  material.emissiveNode = diffuseColor.rgb.mul(0.18);
+  waterLit(material);
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.name = "Drifting leaves";
   mesh.frustumCulled = false;

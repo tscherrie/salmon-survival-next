@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { waterLitShader } from "../../riverscape/src/water.js";
+import { waterLit } from "./render/water.js";
+import { mix, positionWorld, sin, smoothstep, step, vertexColor } from "three/tsl";
 import { MODEL_LENGTH, createFishMesh } from "./anatomy.js";
 import { bed, current, frame, level, locate, place, regionWeights, section } from "./course.js";
 import { conditions } from "./seasons.js";
@@ -598,22 +599,17 @@ export function createEvents(scene, { rocks, sound, daylight, life, random = Mat
   // A floe: a slab broken off the river's ice, its edge jagged where it cracked, old snow
   // lying on it, the broken sides glassy blue-green, the underside grey. Four outlines,
   // one instanced mesh each, so neighbours differ.
-  const floeMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35 });
-  floeMaterial.onBeforeCompile = (shader) => {
-    waterLitShader(shader);
-    // The old snow on top lies in drifts and patches, grey where it has gone slushy.
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <color_fragment>",
-      `#include <color_fragment>
-      {
-        vec2 q = vWaterPosition.xz;
-        float drift = 0.5 + 0.25 * sin(q.x * 0.9 + sin(q.y * 0.7) * 2.0) + 0.25 * sin(q.y * 1.3 + sin(q.x * 0.5) * 1.7);
-        float slush = smoothstep(0.62, 0.9, 0.5 + 0.5 * sin(q.x * 0.31 + q.y * 0.23 + sin(q.x * 0.11) * 3.0));
-        diffuseColor.rgb *= mix(0.86 + 0.14 * drift, 0.72, slush * step(0.8, diffuseColor.b));
-      }`,
-    );
-  };
-  floeMaterial.customProgramCacheKey = () => "salmon-floes-v2";
+  // (The vertex colours are read by the colour node itself.)
+  const floeMaterial = new THREE.MeshStandardNodeMaterial({ roughness: 0.35 });
+  // The old snow on top lies in drifts and patches, grey where it has gone slushy.
+  {
+    const q = positionWorld.xz;
+    const drift = sin(q.x.mul(0.9).add(sin(q.y.mul(0.7)).mul(2))).mul(0.25).add(sin(q.y.mul(1.3).add(sin(q.x.mul(0.5)).mul(1.7))).mul(0.25)).add(0.5);
+    const slush = smoothstep(0.62, 0.9, sin(q.x.mul(0.31).add(q.y.mul(0.23)).add(sin(q.x.mul(0.11)).mul(3))).mul(0.5).add(0.5));
+    const base = vertexColor();
+    floeMaterial.colorNode = base.mul(mix(drift.mul(0.14).add(0.86), 0.72, slush.mul(step(0.8, base.b))));
+    waterLit(floeMaterial);
+  }
   const floeMeshes = [];
   for (let v = 0; v < 4; v++) {
     const shape = new THREE.Shape();

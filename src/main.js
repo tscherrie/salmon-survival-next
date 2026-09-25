@@ -1,12 +1,14 @@
 import * as THREE from "three";
-import { installUnderwaterFog } from "../../riverscape/src/fog.js";
-import { LIGHT_DIRECTION, river as waterUniforms, swayCanopy, waterLitShader, waterTime } from "../../riverscape/src/water.js";
-import { createCaustics } from "../../riverscape/src/caustics.js";
-import { createRipples } from "../../riverscape/src/surface.js";
-import { createPost } from "../../riverscape/src/post.js";
-import { installSoftShadows, shadowFrame } from "../../riverscape/src/shadows.js";
-import { renderSettings } from "../../riverscape/src/render-policy.js";
-import { createDaylight } from "../../riverscape/src/daylight.js";
+import * as TSL from "three/tsl";
+import { installUnderwaterFog } from "./render/fog.js";
+import { LIGHT_DIRECTION, river as waterUniforms, swayCanopy, waterLit, waterTime } from "./render/water.js";
+import { createCaustics } from "./render/caustics.js";
+import { createRipples } from "./render/ripples.js";
+import { createPost } from "./render/post.js";
+import { softShadowFilter, shadowFrame } from "./render/shadows.js";
+import { foliageSky } from "./render/foliage.js";
+import { renderSettings } from "./render/policy.js";
+import { createDaylight } from "./daylight.js";
 import { framebufferSize, qualityName } from "../../shared/render-policy.js";
 import { reportSceneError } from "../../shared/controls.js";
 import { COURSE_VERSION, FALLS, MOUTH, REDD, S, TRIBUTARIES, bed, coolingAt, frame, gusts, level, locate, passSlot, place, poolAt, regionName, regionWeights, relaid, section, setSeasonFlow, driftRich } from "./course.js";
@@ -107,17 +109,19 @@ async function start() {
     return { ...base, shaftSteps: Math.min(base.shaftSteps, 24), maxPixels: Math.min(base.maxPixels, 2.4e6) };
   };
   let settings = gameSettings();
-  installUnderwaterFog();
   // (?pcss=blocker,filter overrides the soft shadows' sample counts, for measuring.)
   const pcss = (query.get("pcss") || "").split(",").map(Number);
-  if (settings.taa && !touchMode) installSoftShadows({ blockerSamples: pcss[0] || (settings.detail ? 16 : 6), filterSamples: pcss[1] || (settings.detail ? 24 : 10), frustum: 44 });
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: "high-performance" });
+  // WebGPU where the browser has it, WebGL 2 where it has not (or with ?webgl).
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: false, alpha: false, powerPreference: "high-performance", forceWebGL: query.has("webgl"), trackTimestamp: query.has("shots") });
+  await renderer.init();
   renderer.setPixelRatio(1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // The last pass (post.js) tone-maps the picture and writes it in sRGB itself; the
+  // renderer's exposure is what it reads.
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
   // A startup mark with what the graphics card holds so far.
   const mark = (name) => performance.mark(`salmon:${name}`, { detail: { programs: renderer.info.programs?.length ?? 0, textures: renderer.info.memory.textures, geometries: renderer.info.memory.geometries } });
 
@@ -125,6 +129,8 @@ async function start() {
   const fogColor = new THREE.Color(0.05, 0.14, 0.14);
   scene.background = fogColor.clone();
   scene.fog = new THREE.FogExp2(fogColor.clone(), 0.02);
+  // Water, not air, between the eye and everything (render/fog.js).
+  installUnderwaterFog(scene);
   const camera = new THREE.PerspectiveCamera(62, 16 / 9, 0.03, 900);
 
   const SKY = 1.15,
@@ -141,24 +147,24 @@ async function start() {
   key.shadow.normalBias = 0.05;
   const shadowRadius = Math.max(2, Math.round((2.5 * settings.shadowSize) / 4096));
   key.shadow.radius = shadowRadius;
+  // Soft shadows that harden toward contact (render/shadows.js), where frames are blended.
+  if (settings.taa && !touchMode) key.shadow.filterNode = softShadowFilter({ blockerSamples: pcss[0] || (settings.detail ? 16 : 6), filterSamples: pcss[1] || (settings.detail ? 24 : 10), frustum: 44 });
   scene.add(key, key.target);
+  // The leaves' glow from behind takes the sky's light (render/foliage.js).
+  foliageSky(sky);
 
   // What silver flanks mirror: the water round the fish, bright above, dim below.
   const envScene = new THREE.Scene();
   envScene.add(
     new THREE.Mesh(
       new THREE.SphereGeometry(10, 48, 24),
-      new THREE.ShaderMaterial({
-        side: THREE.BackSide,
-        vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-        fragmentShader: `varying vec3 vDir; void main(){
-          float up = vDir.y;
-          vec3 water = mix(vec3(0.06, 0.15, 0.16), vec3(0.2, 0.4, 0.42), smoothstep(-0.2, 0.5, up));
-          vec3 c = mix(vec3(0.26, 0.25, 0.2), water, smoothstep(-0.55, -0.1, up));
-          c += vec3(3.4, 3.6, 3.5) * smoothstep(0.72, 0.9, up);
-          gl_FragColor = vec4(c, 1.0);
-        }`,
-      }),
+      (() => {
+        const material = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide });
+        const up = TSL.normalize(TSL.positionLocal).y;
+        const water = TSL.mix(TSL.vec3(0.06, 0.15, 0.16), TSL.vec3(0.2, 0.4, 0.42), TSL.smoothstep(-0.2, 0.5, up));
+        material.colorNode = TSL.mix(TSL.vec3(0.26, 0.25, 0.2), water, TSL.smoothstep(-0.55, -0.1, up)).add(TSL.vec3(3.4, 3.6, 3.5).mul(TSL.smoothstep(0.72, 0.9, up)));
+        return material;
+      })(),
     ),
   );
   const pmrem = new THREE.PMREMGenerator(renderer);
@@ -2191,8 +2197,7 @@ async function start() {
   // Spawning: the fish settles over the gravel of the redd, and the eggs go down among the
   // stones, orange and bright; then the light goes white, and in the same gravel the next
   // generation hatches among the eggs that are left.
-  const eggMaterial = new THREE.MeshStandardMaterial({ color: 0xff7a2a, roughness: 0.25, emissive: 0x401000, transparent: true, opacity: 0.92 });
-  eggMaterial.onBeforeCompile = (shader) => waterLitShader(shader);
+  const eggMaterial = waterLit(new THREE.MeshStandardNodeMaterial({ color: 0xff7a2a, roughness: 0.25, emissive: 0x401000, transparent: true, opacity: 0.92 }));
   const eggs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.05, 10, 8), eggMaterial, 120);
   eggs.count = 0;
   eggs.frustumCulled = false;
@@ -2319,7 +2324,7 @@ async function start() {
       skyDome.visible = true;
       // The dome goes with the eye: it is the sky at any distance.
       skyDome.position.copy(camera.position);
-      post.composite.uniforms.shaftStrength.value = 0;
+      post.composite.shaftStrength.value = 0;
     } else {
       scene.fog.color.copy(lookHere.fog).multiplyScalar(light * (1 - 0.45 * iced));
       // The snowmelt flood runs brown and thick; the low water of late summer clear.
@@ -2331,9 +2336,9 @@ async function start() {
       // hide the edge of what is built (else it stands against the haze, square and hard).
       scene.fog.density = Math.max(scene.fog.density, (3.6 / builtRadius()) * wideWater(cameraRiver.s));
       skyDome.visible = false;
-      post.composite.uniforms.shaftStrength.value = 1 - 0.85 * iced;
+      post.composite.shaftStrength.value = 1 - 0.85 * iced;
       // Ice mirrors nothing.
-      if (post.composite.uniforms.reflectionStrength) post.composite.uniforms.reflectionStrength.value = 0.75 * (1 - iced);
+      post.composite.reflectionStrength.value = 0.75 * (1 - iced);
     }
     surfaceUniforms.fogColor.value.copy(scene.fog.color);
     surfaceUniforms.fogDensity.value = scene.fog.density;
@@ -2430,7 +2435,6 @@ async function start() {
 
     prof.mark("draw-cpu");
     caustics.render();
-    if (prof.on) renderer.getContext().finish();
     prof.mark("caustics");
     renderer.shadowMap.needsUpdate = true;
     camera.far = above ? 900 : clamp(4.5 / scene.fog.density, 120, 600);
@@ -2439,17 +2443,14 @@ async function start() {
     post.jitter();
     if (settings.taa) shadowFrame(key, shadowRadius, frames);
     renderer.setRenderTarget(post.main);
-    if (prof.on) renderer.getContext().finish();
     prof.mark("draw-prep");
     renderer.render(scene, camera);
     if (prof.on) {
-      renderer.getContext().finish();
       prof.calls = renderer.info.render.calls;
       prof.tris = renderer.info.render.triangles;
     }
     prof.mark("render");
     post.render({ light: key, sunLight, density: above ? 0.0001 : scene.fog.density });
-    if (prof.on) renderer.getContext().finish();
     prof.mark("post");
     frames++;
   }
@@ -2484,10 +2485,11 @@ async function start() {
     // compiled a second time at the first frame.
     // Then the photographs go up to the graphics card. (Uploading them while the shaders
     // compile gains nothing: the card does one thing after the other either way.)
+    // (Drawn once, everything showing: that builds every pipeline, in the background on
+    // WebGPU. The renderer's compileAsync cannot yet build them for a target of our own.)
     renderer.setRenderTarget(post.main);
-    try {
-      await renderer.compileAsync(scene, camera);
-    } catch {}
+    renderer.shadowMap.needsUpdate = true;
+    renderer.render(scene, camera);
     mark("compiled");
     await photosLoaded();
     mark("photos");
@@ -2599,6 +2601,8 @@ async function start() {
       renderer,
       scene,
       post,
+      caustics,
+      key,
       look,
       held,
       input,

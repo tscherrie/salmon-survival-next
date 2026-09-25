@@ -17,6 +17,20 @@
     <meta name="apple-mobile-web-app-title" content="Salmon" />
     <link rel="stylesheet" href="style.css" />
     <script>
+      // Development: in a run of photo points, keep what goes wrong (src/dev/shots.js sends it
+      // to the development server with the picture).
+      if (/[?&]shots=/.test(location.search)) {
+        window.__shotLog = [];
+        const keep = (kind, args) => window.__shotLog.length < 200 && window.__shotLog.push(kind + ": " + args.map((a) => (a && a.stack) || String(a)).join(" ").slice(0, 2000));
+        for (const kind of ["error", "warn"]) {
+          const original = console[kind].bind(console);
+          console[kind] = (...args) => (keep(kind, args), original(...args));
+        }
+        addEventListener("error", (e) => keep("uncaught", [e.error || e.message]));
+        addEventListener("unhandledrejection", (e) => keep("rejection", [e.reason]));
+      }
+    </script>
+    <script>
       // Development: ?seed=n makes Math.random repeat itself from one load to the next, so
       // pictures taken to compare show the same fish in the same places (src/dev/shots.js).
       (() => {
@@ -31,10 +45,15 @@
         };
       })();
     </script>
+    <!-- three.js r186 with its WebGPU renderer (falling back to WebGL 2 where there is no
+         WebGPU), the node shading language, and the add-ons the game uses (vendor/jsm). -->
     <script type="importmap">
       {
         "imports": {
-          "three": "../../vendor/three.module.js"
+          "three": "./vendor/three.webgpu.js",
+          "three/webgpu": "./vendor/three.webgpu.js",
+          "three/tsl": "./vendor/three.tsl.js",
+          "three/addons/": "./vendor/jsm/"
         }
       }
     </script>
@@ -84,33 +103,31 @@
     <link rel="modulepreload" href="/src/vegan.js" />
     <link rel="modulepreload" href="/src/heritage.js" />
     <link rel="modulepreload" href="/src/anatomy.js" />
-    <link rel="modulepreload" href="/riverscape/src/fish.js" />
-    <link rel="modulepreload" href="/riverscape/src/fish-anatomy.js" />
+    <link rel="modulepreload" href="/src/render/water.js" />
+    <link rel="modulepreload" href="/src/render/caustics.js" />
+    <link rel="modulepreload" href="/src/render/fog.js" />
+    <link rel="modulepreload" href="/src/render/shadows.js" />
+    <link rel="modulepreload" href="/src/render/post.js" />
+    <link rel="modulepreload" href="/src/render/foliage.js" />
+    <link rel="modulepreload" href="/src/render/swim.js" />
+    <link rel="modulepreload" href="/src/render/instancing.js" />
+    <link rel="modulepreload" href="/src/render/geometry.js" />
+    <link rel="modulepreload" href="/src/render/ripples.js" />
+    <link rel="modulepreload" href="/src/render/policy.js" />
+    <link rel="modulepreload" href="/src/daylight.js" />
     <link rel="modulepreload" href="/src/terrain.js" />
     <link rel="modulepreload" href="/src/clearings.js" />
     <link rel="modulepreload" href="/src/forest.js" />
     <link rel="modulepreload" href="/src/flora.js" />
-    <link rel="modulepreload" href="/riverscape/src/foliage.js" />
-    <link rel="modulepreload" href="/riverscape/src/environment.js" />
     <link rel="modulepreload" href="/src/materials.js" />
     <link rel="modulepreload" href="/src/flowfield.js" />
-    <link rel="modulepreload" href="/riverscape/src/flow.js" />
     <link rel="modulepreload" href="/src/course.js" />
     <link rel="modulepreload" href="/shared/controls.js" />
     <link rel="modulepreload" href="/ui/icons.js" />
-    <link rel="modulepreload" href="/riverscape/src/daylight.js" />
-    <link rel="modulepreload" href="/riverscape/src/render-policy.js" />
     <link rel="modulepreload" href="/shared/render-policy.js" />
-    <link rel="modulepreload" href="/riverscape/src/shadows.js" />
-    <link rel="modulepreload" href="/riverscape/src/post.js" />
-    <link rel="modulepreload" href="/riverscape/src/surface.js" />
-    <link rel="modulepreload" href="/riverscape/src/caustics.js" />
-    <link rel="modulepreload" href="/riverscape/src/water.js" />
-    <link rel="modulepreload" href="/riverscape/src/math.js" />
-    <link rel="modulepreload" href="/riverscape/src/layout.js" />
     <link rel="modulepreload" href="/shared/random.js" />
-    <link rel="modulepreload" href="/riverscape/src/fog.js" />
-    <link rel="modulepreload" href="/vendor/three.module.js" />
+    <link rel="modulepreload" href="/vendor/three.webgpu.js" />
+    <link rel="modulepreload" href="/vendor/three.tsl.js" />
     <link rel="modulepreload" href="/vendor/three.core.js" />
   </head>
   <body>

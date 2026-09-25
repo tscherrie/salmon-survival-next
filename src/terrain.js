@@ -1,7 +1,7 @@
 import * as THREE from "three";
-import { rockGeometry } from "../../riverscape/src/environment.js";
-import { GeometryBatch, randomGenerator } from "../../riverscape/src/math.js";
-import { foliageDepth, foliageMaterial } from "../../riverscape/src/foliage.js";
+import { rockGeometry } from "./render/geometry.js";
+import { GeometryBatch, randomGenerator } from "./render/geometry.js";
+import { foliageMaterial } from "./render/foliage.js";
 import { FALLS, MILLS, S, TRIBUTARIES, bedDetail, current, frame, level, passSlot, place, section, smooth, tributaryAt } from "./course.js";
 import { SolidBatch } from "./flora.js";
 import { TreeBatch, birch, fallenTrunk, fern, forestMaterial, juniper, pine, shrub, spruce, stump } from "./forest.js";
@@ -107,7 +107,6 @@ function blockIndex(s) {
 
 export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, detail = true } = {}) {
   const leaves = foliageMaterial();
-  const leafShadow = foliageDepth({ animated: true });
   // The forest (forest.js): needles and leaves cut out of cards, swaying, with the seasons.
   const treeMaterial = forestMaterial();
 
@@ -846,7 +845,6 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
       geometry.computeBoundingSphere();
       geometry.boundingSphere.radius += 8;
       const mesh = new THREE.Mesh(geometry, leaves);
-      mesh.customDepthMaterial = leafShadow;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.name = "Plants";

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { FALLS, RAPIDS, TRIBUTARIES, bed, current, level, place, section, smooth } from "./course.js";
 import { GRAVITY } from "./salmon.js";
-import { createBubbleMaterial, createCurtainMaterial, createFoamCloudMaterial, createFoamMatMaterial } from "./materials.js";
+import { PointCloud, createBubbleMaterial, createCurtainMaterial, createFoamCloudMaterial, createFoamMatMaterial } from "./materials.js";
 
 // White water: the curtain of each fall streaming off its lip in the arc the water's speed
 // gives it, lumpy and glassy where it leaves the lip; the plume of bubbles it drives down
@@ -76,11 +76,7 @@ export function createFalls(scene) {
     geometry.computeBoundingSphere();
     geometry.boundingSphere.radius += 1;
     // Each curtain its own copy of the material, for its own edges.
-    const material = curtainMaterial.clone();
-    material.uniforms.waterTime = curtainMaterial.uniforms.waterTime;
-    material.uniforms.light = curtainMaterial.uniforms.light;
-    material.uniforms.uFrom = { value: from };
-    material.uniforms.uTo = { value: to };
+    const material = createCurtainMaterial({ light: curtainMaterial.uniforms.light, from, to });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `Fall ${f.name}`;
     mesh.renderOrder = 2;
@@ -117,11 +113,7 @@ export function createFalls(scene) {
         g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
         g.setIndex(idx);
         g.computeBoundingSphere();
-        const m = underMaterial.clone();
-        m.uniforms.waterTime = underMaterial.uniforms.waterTime;
-        m.uniforms.light = underMaterial.uniforms.light;
-        m.uniforms.uFrom = { value: from };
-        m.uniforms.uTo = { value: to };
+        const m = createCurtainMaterial({ under: true, light: underMaterial.uniforms.light, from, to });
         under = new THREE.Mesh(g, m);
         under.name = `Plunge ${f.name}`;
         under.renderOrder = 2;
@@ -182,14 +174,7 @@ export function createFalls(scene) {
     geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
     geometry.setIndex(indices);
     geometry.computeBoundingSphere();
-    const material = foamMaterial.clone();
-    material.uniforms.waterTime = foamMaterial.uniforms.waterTime;
-    material.uniforms.light = foamMaterial.uniforms.light;
-    material.uniforms.uFrom.value = from;
-    material.uniforms.uTo.value = to;
-    material.uniforms.uLen.value = length;
-    material.uniforms.uSpeed.value = speed;
-    material.uniforms.uStrength.value = strength;
+    const material = createFoamMatMaterial({ light: foamMaterial.uniforms.light, from, to, length, speed, strength });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = name;
     mesh.renderOrder = 1;
@@ -252,11 +237,7 @@ export function createFalls(scene) {
     geometry.setIndex(indices);
     geometry.computeBoundingSphere();
     geometry.boundingSphere.radius += 1;
-    const material = curtainMaterial.clone();
-    material.uniforms.waterTime = curtainMaterial.uniforms.waterTime;
-    material.uniforms.light = curtainMaterial.uniforms.light;
-    material.uniforms.uFrom = { value: from };
-    material.uniforms.uTo = { value: to };
+    const material = createCurtainMaterial({ light: curtainMaterial.uniforms.light, from, to });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `Fall ${b.name}`;
     mesh.renderOrder = 2;
@@ -293,8 +274,8 @@ export function createFalls(scene) {
   plumeGeometry.setAttribute("position", new THREE.BufferAttribute(plumePositions, 3));
   plumeGeometry.setAttribute("size", new THREE.BufferAttribute(plumeSizes, 1));
   plumeGeometry.setAttribute("alpha", new THREE.BufferAttribute(plumeAlpha, 1));
-  const bubbleMaterial = createBubbleMaterial();
-  const plume = new THREE.Points(plumeGeometry, bubbleMaterial);
+  const bubbleMaterial = createBubbleMaterial(plumeGeometry);
+  const plume = new PointCloud(plumeGeometry, bubbleMaterial);
   plume.frustumCulled = false;
   plume.name = "Plume";
   scene.add(plume);
@@ -308,7 +289,7 @@ export function createFalls(scene) {
   sprayGeometry.setAttribute("position", new THREE.BufferAttribute(sprayPositions, 3));
   sprayGeometry.setAttribute("size", new THREE.BufferAttribute(spraySizes, 1));
   sprayGeometry.setAttribute("alpha", new THREE.BufferAttribute(sprayAlpha, 1));
-  const spray = new THREE.Points(sprayGeometry, bubbleMaterial);
+  const spray = new PointCloud(sprayGeometry, createBubbleMaterial(sprayGeometry, { light: bubbleMaterial.uniforms.light }));
   spray.frustumCulled = false;
   spray.name = "Spray";
   scene.add(spray);
@@ -326,8 +307,8 @@ export function createFalls(scene) {
   cloudGeometry.setAttribute("size", new THREE.BufferAttribute(cloudSizes, 1));
   cloudGeometry.setAttribute("alpha", new THREE.BufferAttribute(cloudAlpha, 1));
   cloudGeometry.setAttribute("seed", new THREE.BufferAttribute(cloudSeeds, 1));
-  const cloudMaterial = createFoamCloudMaterial();
-  const cloud = new THREE.Points(cloudGeometry, cloudMaterial);
+  const cloudMaterial = createFoamCloudMaterial(cloudGeometry);
+  const cloud = new PointCloud(cloudGeometry, cloudMaterial);
   cloud.frustumCulled = false;
   cloud.name = "Foam cloud";
   cloud.renderOrder = 3;
@@ -344,8 +325,8 @@ export function createFalls(scene) {
   mistGeometry.setAttribute("size", new THREE.BufferAttribute(mistSizes, 1));
   mistGeometry.setAttribute("alpha", new THREE.BufferAttribute(mistAlpha, 1));
   mistGeometry.setAttribute("seed", new THREE.BufferAttribute(new Float32Array(MIST).map(() => Math.random()), 1));
-  const mistMaterial = createFoamCloudMaterial();
-  const mist = new THREE.Points(mistGeometry, mistMaterial);
+  const mistMaterial = createFoamCloudMaterial(mistGeometry);
+  const mist = new PointCloud(mistGeometry, mistMaterial);
   mist.frustumCulled = false;
   mist.name = "Mist";
   mist.renderOrder = 3;

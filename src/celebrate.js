@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { abs, dot, exp, length, pow, step, uniform, uv, vec3 } from "three/tsl";
+import { PointCloud, perPoint } from "./materials.js";
 
 // A new stage of life, marked: a burst of golden light round the fish -- motes that swirl
 // out and up from it and twinkle away, a ring of light spreading from it, a stream of
@@ -17,41 +19,22 @@ export function createCelebration(scene) {
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute("size", new THREE.BufferAttribute(sizes, 1));
   geometry.setAttribute("alpha", new THREE.BufferAttribute(alphas, 1));
-  const material = new THREE.ShaderMaterial({
-    uniforms: { scale: { value: 600 } },
-    vertexShader: /* glsl */ `
-      attribute vec3 color;
-      attribute float size;
-      attribute float alpha;
-      uniform float scale;
-      varying vec3 vColor;
-      varying float vAlpha;
-      void main() {
-        vColor = color;
-        vAlpha = alpha;
-        vec4 view = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = clamp(size * scale / max(-view.z, 0.01), 1.0, 64.0);
-        gl_Position = projectionMatrix * view;
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      varying vec3 vColor;
-      varying float vAlpha;
-      void main() {
-        vec2 p = gl_PointCoord * 2.0 - 1.0;
-        float r = dot(p, p);
-        if (r > 1.0) discard;
-        // A soft core and a four-pointed twinkle.
-        float core = exp(-r * 5.0);
-        float star = exp(-abs(p.x) * 14.0) * exp(-abs(p.y) * 2.2) + exp(-abs(p.y) * 14.0) * exp(-abs(p.x) * 2.2);
-        gl_FragColor = vec4(vColor * (core + 0.6 * star) * vAlpha, 1.0);
-      }
-    `,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-  });
-  const points = new THREE.Points(geometry, material);
+  const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending, sizeAttenuation: true });
+  material.positionNode = perPoint(geometry, "position");
+  material.scaleNode = perPoint(geometry, "size");
+  {
+    const p = uv().mul(2).sub(1);
+    const r = dot(p, p);
+    // A soft core and a four-pointed twinkle.
+    const core = exp(r.mul(-5));
+    const star = exp(abs(p.x).mul(-14))
+      .mul(exp(abs(p.y).mul(-2.2)))
+      .add(exp(abs(p.y).mul(-14)).mul(exp(abs(p.x).mul(-2.2))));
+    material.colorNode = perPoint(geometry, "color").mul(core.add(star.mul(0.6))).mul(perPoint(geometry, "alpha"));
+    material.opacityNode = step(r, 1);
+    material.alphaTest = 0.5;
+  }
+  const points = new PointCloud(geometry, material);
   points.frustumCulled = false;
   points.visible = false;
   points.renderOrder = 5;
@@ -59,32 +42,17 @@ export function createCelebration(scene) {
   scene.add(points);
 
   // Two rings of light, one after the other, spreading out from the fish.
-  const ringMaterial = new THREE.ShaderMaterial({
-    uniforms: { strength: { value: 0 }, tint: { value: new THREE.Color(1.6, 1.2, 0.55) } },
-    vertexShader: /* glsl */ `
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform float strength;
-      uniform vec3 tint;
-      varying vec2 vUv;
-      void main() {
-        float r = length(vUv * 2.0 - 1.0);
-        float band = exp(-pow((r - 0.85) * 16.0, 2.0)) + 0.2 * exp(-pow((r - 0.7) * 22.0, 2.0));
-        gl_FragColor = vec4(tint * band * strength, 1.0);
-      }
-    `,
-    transparent: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    side: THREE.DoubleSide,
-  });
+  const ringMaterial = () => {
+    const strength = uniform(0);
+    const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    const r = length(uv().mul(2).sub(1));
+    const band = exp(pow(r.sub(0.85).mul(16), 2).negate()).add(exp(pow(r.sub(0.7).mul(22), 2).negate()).mul(0.2));
+    material.colorNode = vec3(1.6, 1.2, 0.55).mul(band).mul(strength);
+    material.uniforms = { strength };
+    return material;
+  };
   const rings = [0, 1].map(() => {
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), ringMaterial.clone());
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), ringMaterial());
     mesh.visible = false;
     mesh.frustumCulled = false;
     mesh.renderOrder = 6;

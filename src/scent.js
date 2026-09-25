@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { pointCloud } from "./materials.js";
 import { S, locate, tributaryAt } from "./course.js";
 
 // The scent of home. Every river smells of its own -- of the stones, the soil and the plants
@@ -66,8 +67,8 @@ export function createScent(scene) {
   grad.addColorStop(1, "rgba(255,255,255,0)");
   g.fillStyle = grad;
   g.fillRect(0, 0, 32, 32);
-  const material = new THREE.PointsMaterial({ color: 0xffe3a0, size: 0.28, map: new THREE.CanvasTexture(dot), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true });
-  const glints = new THREE.Points(geometry, material);
+  const glints = pointCloud(geometry, { color: 0xffe3a0, size: 0.28 * 0.6, map: new THREE.CanvasTexture(dot), opacity: 0, blending: THREE.AdditiveBlending });
+  const material = glints.material;
   glints.frustumCulled = false;
   glints.visible = false;
   glints.name = "Scent";
