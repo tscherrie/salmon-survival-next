@@ -43,7 +43,8 @@ Useful for trying things: `?new&stage=parr&at=4500` starts a new parr at a place
 - `src/events.js` – storms, anglers, otters, ice floes, northern lights
 - `src/eddies*.js`, `src/flowfield.js` – the water flowing round stones
 - `src/i18n*.js` – the translations (the game is written in German; English, Chinese, Japanese and Bulgarian are laid over it)
-- `riverscape/`, `shared/`, `ui/`, `vendor/` – the rendering it builds on, from Desktop Habitats, and three.js
+- `riverscape/src/`, `shared/`, `ui/` – the water, light, fish and foliage it builds on, from Desktop Habitats (the parts the game uses); `vendor/` – three.js
+- `src/dev/shots.js`, `tools/` – photo points: the same scenes pictured and timed for every graphics change (`node tools/shots.mjs <set>`, then `tools/compare.html`)
 
 ## Credits and license
 
