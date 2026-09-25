@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { blade, stem } from "./render/foliage.js";
+import { blade, stem, stemStrand } from "./render/foliage.js";
+import { randomGenerator } from "./render/geometry.js";
 
 // What grows in a northern river and the sea beyond it, built from the aquarium's blade
 // and stem generators so it sways in the same current:
@@ -165,20 +166,70 @@ export function sedge(batch, x, z, ground, surface, random, scale = 1) {
   }
 }
 
-// Reeds: stiff stems from the bed up past the surface.
+// Reeds: a stand of tall thin stems from the bed up past the surface, each tapering to a
+// point under a feathery plume that hangs to one side, with long narrow leaves standing out
+// from it and drooping at their tips, the lower ones already straw.
 export function reeds(batch, x, z, ground, surface, random, scale = 1) {
+  // (Grown from a stream of its own, after drawing from the river's as many numbers as the
+  // plain stems it replaced did: the rest of the river grows as it always has.)
+  const stems = Math.floor(18 + 22 * random());
+  const seed = random();
+  for (let i = 1; i < stems * 8; i++) random();
+  random = randomGenerator(Math.floor(seed * 2147483647));
   const range = ranger(random);
-  const count = Math.floor(range(18, 40));
+  const count = Math.floor(range(22, 44));
   const root = vec(x, ground - 0.05, z);
+  // The stand leans one way, as the wind has set it.
+  const wind = range(0, TAU);
   for (let i = 0; i < count; i++) {
     const r = Math.sqrt(random()) * 3.2 * scale;
     const a = range(0, TAU);
     const base = vec(x + Math.cos(a) * r, ground - 0.05, z + Math.sin(a) * r);
-    const top = surface + range(6, 16) * scale;
-    const lean = vec(range(-1, 1), 0, range(-1, 1)).multiplyScalar(0.8);
-    const points = [base, base.clone().add(vec(lean.x * 0.2, (top - base.y) * 0.5, lean.z * 0.2)), base.clone().add(vec(lean.x, top - base.y, lean.z))];
-    const color = new THREE.Color().setHSL(range(0.12, 0.18), range(0.35, 0.5), range(0.22, 0.32));
-    stem(batch, points, range(0.05, 0.09) * scale, color, root, 0.12);
+    const height = surface - base.y + range(3.5, 8) * scale;
+    const lean = range(0.03, 0.12) * height;
+    const way = wind + range(-0.6, 0.6);
+    const d = vec(Math.cos(way), 0, Math.sin(way));
+    const points = [base, base.clone().addScaledVector(d, lean * 0.15).add(vec(0, height * 0.5, 0)), base.clone().addScaledVector(d, lean).add(vec(0, height, 0))];
+    const straw = random() < 0.25;
+    const color = straw ? new THREE.Color().setHSL(range(0.1, 0.13), range(0.35, 0.5), range(0.42, 0.55)) : new THREE.Color().setHSL(range(0.17, 0.22), range(0.35, 0.5), range(0.26, 0.36));
+    const { curve, length } = stem(batch, points, range(0.022, 0.034) * scale, color, root, 0.14, null, { taper: 0.94, rows: 16 });
+    // Leaves from the nodes of the upper part, two ranks, standing out and bending over.
+    const leaves = Math.floor(range(3, 6));
+    for (let k = 0; k < leaves; k++) {
+      const t = range(0.35, 0.85) * (0.8 + 0.2 * (k / leaves));
+      const node = curve.getPoint(t);
+      if (node.y < surface) continue;
+      const side = way + (k % 2 ? 1 : -1) * range(1.2, 1.9);
+      const out = vec(Math.cos(side), 0, Math.sin(side));
+      const long = range(0.22, 0.4) * height;
+      const mid = node.clone().addScaledVector(out, long * 0.45).add(vec(0, long * 0.35, 0));
+      const tip = node.clone().addScaledVector(out, long).add(vec(0, long * range(0.05, 0.25), 0));
+      const leaf = new THREE.Color().setHSL(range(0.18, 0.24), range(0.35, 0.55), range(0.3, 0.4));
+      blade(batch, [node, mid, tip], range(0.06, 0.1) * scale, t < 0.5 && random() < 0.5 ? leaf.lerp(new THREE.Color(0.55, 0.47, 0.3), 0.7) : leaf, root, 0.3, {
+        rows: 7,
+        cols: 1,
+        ribbon: true,
+        thin: 0.8,
+        twist: side + Math.PI / 2,
+        browning: range(0.1, 0.35),
+        attached: stemStrand(curve, t, length, 0.14),
+        random,
+      });
+    }
+    // The plume: soft brown-purple sprays hanging off the top.
+    if (random() < 0.8) {
+      const plume = new THREE.Color().setHSL(range(0.04, 0.09), range(0.2, 0.35), range(0.3, 0.42));
+      const sprays = Math.floor(range(4, 7));
+      for (let k = 0; k < sprays; k++) {
+        const b = way + range(-0.9, 0.9);
+        const o = vec(Math.cos(b), 0, Math.sin(b));
+        const long = range(0.07, 0.13) * height;
+        const from = curve.getPoint(1 - range(0, 0.06));
+        const mid = from.clone().addScaledVector(o, long * 0.45).add(vec(0, long * 0.1, 0));
+        const tip = from.clone().addScaledVector(o, long * 0.8).add(vec(0, -long * range(0.2, 0.5), 0));
+        blade(batch, [from, mid, tip], range(0.09, 0.16) * scale, plume, root, 0.5, { rows: 5, cols: 2, thin: 1, attached: stemStrand(curve, 1, length, 0.14), random });
+      }
+    }
   }
 }
 

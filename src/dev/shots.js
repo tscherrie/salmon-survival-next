@@ -321,6 +321,18 @@ export async function runShots(salmon, query) {
   }
   if (shot.wet !== undefined) salmon.wetLens(shot.wet);
   salmon.pause(true);
+  // (?xhide=regex: the parts of the scene whose names match left out, to find what is what.)
+  if (query.get("xhide")) {
+    const hide = new RegExp(query.get("xhide"));
+    const found = new Set();
+    salmon.scene.traverse((o) => {
+      if (o.name && hide.test(o.name)) {
+        o.visible = false;
+        found.add(o.name);
+      }
+    });
+    console.log("hidden:", [...found].join(", "));
+  }
   // Measured at the size of the picture, whatever the window: the same pixels every time.
   const bounds = salmon.renderer.domElement.getBoundingClientRect();
   salmon.renderer.setSize(1600, 900, false);

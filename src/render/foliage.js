@@ -23,6 +23,7 @@ import {
   min,
   mix,
   modelNormalMatrix,
+  modelWorldMatrix,
   normalGeometry,
   normalView,
   normalize,
@@ -44,7 +45,7 @@ import {
   vec4,
 } from "three/tsl";
 import { range, smoothstep as smoothJS, vec } from "./geometry.js";
-import { FLOW_DIRECTION, currentStrength, waterLit, waterTime } from "./water.js";
+import { FLOW_DIRECTION, currentStrength, surfaceLevelAt, waterLit, waterTime } from "./water.js";
 import { flowAt } from "../flowfield.js";
 
 // Shared foliage construction: the current model in the vertex stage, the submerged leaf
@@ -107,7 +108,15 @@ function strandPosition() {
     pushed.subAssign(along.xyz.mul(dot(pushed, along.xyz)));
     // A blade can be pushed aside, not torn off: the displacement saturates.
     pushed.mulAssign(float(1.6).div(max(1.6, length(pushed))));
-    return position.add(bend.xyz.mul(motion.x)).add(pushed);
+    const moved = position.add(bend.xyz.mul(motion.x)).add(pushed).toVar();
+    // What grows under the water stays under it: a long ribbon lying out under the surface
+    // flaps with the current, and would flap up through it into the air.
+    const rest = modelWorldMatrix.mul(vec4(position, 1)).xyz;
+    const ceiling = surfaceLevelAt(rest).sub(0.04);
+    If(rest.y.lessThan(ceiling), () => {
+      moved.y.assign(min(moved.y, ceiling.sub(rest.y).add(position.y)));
+    });
+    return moved;
   })();
 }
 
@@ -237,12 +246,15 @@ export function blade(
     attached = null,
     browning = 0,
     emit = true,
+    random = null,
   } = {},
 ) {
   // Even an omitted background blade consumes its original two random values. This
   // preserves all subsequent procedural geometry rather than regenerating the scene.
-  const phase = range(0, TAU);
-  const turn = ribbon ? range(-0.7, 0.7) : range(-0.12, 0.12);
+  // (A plant grown from a stream of its own passes it, and leaves the shared one alone.)
+  const draw = random ? (a, b) => a + (b - a) * random() : range;
+  const phase = draw(0, TAU);
+  const turn = ribbon ? draw(-0.7, 0.7) : draw(-0.12, 0.12);
   if (!emit) return;
   const curve =
     points.length === 3
@@ -293,10 +305,12 @@ export function blade(
   }
 }
 
-export function stem(batch, points, radius, color, root, compliance, attached = null) {
+// taper: how much of its radius a stem has lost at its tip; rows: rings along it (more
+// for a long thin stem, so it bends without corners).
+export function stem(batch, points, radius, color, root, compliance, attached = null, { taper = 0.65, rows: ringCount = 0 } = {}) {
   const curve = new THREE.CatmullRomCurve3(points);
   const length = curve.getLength();
-  const rows = Math.max(4, points.length * 3),
+  const rows = ringCount || Math.max(4, points.length * 3),
     cols = 5;
   const start = batch.positions.length / 3;
   for (let i = 0; i <= rows; i++) {
@@ -312,8 +326,8 @@ export function stem(batch, points, radius, color, root, compliance, attached = 
       const angle = (j / cols) * TAU;
       const v = p
         .clone()
-        .addScaledVector(a, Math.cos(angle) * radius * (1 - 0.65 * t))
-        .addScaledVector(b, Math.sin(angle) * radius * (1 - 0.65 * t));
+        .addScaledVector(a, Math.cos(angle) * radius * (1 - taper * t))
+        .addScaledVector(b, Math.sin(angle) * radius * (1 - taper * t));
       batch.vertex(v, [j / cols, t], color, root, strand, 0);
       if (i < rows && j < cols) {
         const k = start + i * (cols + 1) + j;
