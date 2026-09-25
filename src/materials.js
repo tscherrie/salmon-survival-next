@@ -60,7 +60,7 @@ import {
 import { RIPPLE_COUNT, RIPPLE_SPEED, SUN_DIRECTION, river, waterLit, waterTime } from "./render/water.js";
 import { surfaceWaves } from "./render/caustics.js";
 import { extinction, fogNodes, underwaterInscatter, waterBetween } from "./render/fog.js";
-import { mirrorMap, mirrorOn } from "./render/mirror.js";
+import { mirrorMap, mirrorOn, windowMap, windowOn } from "./render/mirror.js";
 import { eddyAt } from "./flowfield.js";
 
 // The materials the river is made of: its bed (gravel, sand, silt and rock, with the film
@@ -547,7 +547,25 @@ export function createSurfaceMaterial({ clear = true } = {}) {
         const rp = cosi.sub(cost.mul(eta)).div(cosi.add(cost.mul(eta)));
         fresnel.assign(rs.mul(rs).add(rp.mul(rp)).mul(0.5));
         const transmitted = normalize(incident.mul(eta).add(normal.mul(cosi.mul(eta).sub(cost))));
-        color.addAssign(skyColor(transmitted, waterTime).mul(fresnel.oneMinus()));
+        // The world above: the banks, the trees and the sky, from the window's cube
+        // (mirror.js), or the sky alone. (Four looks close round the ray, a little
+        // blurred: the leaves up there are dithered, and magnified in the window their
+        // pattern would show as blocks.)
+        const through = vec3().toVar();
+        If(windowOn.greaterThan(0.5).and(clear), () => {
+          const r = 0.012;
+          through.assign(
+            windowMap
+              .sample(transmitted.add(vec3(r, r, r)))
+              .rgb.add(windowMap.sample(transmitted.add(vec3(r, -r, -r))).rgb)
+              .add(windowMap.sample(transmitted.add(vec3(-r, r, -r))).rgb)
+              .add(windowMap.sample(transmitted.add(vec3(-r, -r, r))).rgb)
+              .mul(0.25),
+          );
+        }).Else(() => {
+          through.assign(skyColor(transmitted, waterTime));
+        });
+        color.addAssign(through.mul(fresnel.oneMinus()));
       });
       const mirrored = reflect(incident, normal);
       const bedSeen = smoothstep(-0.1, -0.45, mirrored.y);

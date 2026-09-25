@@ -13,7 +13,7 @@ import { framebufferSize, qualityName } from "../../shared/render-policy.js";
 import { reportSceneError } from "../../shared/controls.js";
 import { COURSE_VERSION, FALLS, MOUTH, REDD, S, TRIBUTARIES, bed, coolingAt, frame, gusts, level, locate, passSlot, place, poolAt, regionName, regionWeights, relaid, section, setSeasonFlow, driftRich } from "./course.js";
 import { createFlowField } from "./flowfield.js";
-import { createMirror } from "./render/mirror.js";
+import { createMirror, createWindow } from "./render/mirror.js";
 import { createBedMaterial, createRockMaterials, createSky, photoTextures, photosLoaded, createSurfaceMaterial,skyUniforms, surfaceUniforms } from "./materials.js";
 import { createTerrain } from "./terrain.js";
 import { treeUniforms } from "./forest.js";
@@ -190,6 +190,9 @@ async function start() {
   mark("textures");
   const surfaceMaterial = createSurfaceMaterial({ clear: settings.clearWater });
   const waterMirror = settings.clearWater ? createMirror(renderer, { scale: 0.5 }) : null;
+  const waterWindow = settings.clearWater ? createWindow(renderer) : null;
+  const windowAt = new THREE.Vector3();
+  const waterFog = new THREE.Color();
   let surfaceDrawn = 0;
   const terrain = createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, detail: settings.detail });
   const pebbles = createPebbles(scene);
@@ -2506,6 +2509,22 @@ async function start() {
     renderer.setRenderTarget(post.main);
     prof.mark("draw-prep");
     renderer.render(scene, camera);
+    // Under the water the world above as the window overhead shows it, for the next frame:
+    // seen from just over the surface, through air (and with the sun's shadows as drawn).
+    if (waterWindow && !above) {
+      waterFog.copy(scene.fog.color);
+      const density = scene.fog.density;
+      scene.fog.color.copy(AIR).multiply(skyUniforms.skyLevel.value);
+      scene.fog.density = 0.9 / builtRadius();
+      windowAt.set(camera.position.x, lv + 0.1, camera.position.z);
+      skyDome.position.copy(windowAt);
+      skyDome.visible = true;
+      key.shadow.autoUpdate = false;
+      waterWindow.render(scene, windowAt, surfaceMaterial);
+      skyDome.visible = false;
+      scene.fog.color.copy(waterFog);
+      scene.fog.density = density;
+    } else waterWindow?.off();
     key.shadow.autoUpdate = true;
     if (prof.on) {
       prof.calls = renderer.info.render.calls;
@@ -2552,12 +2571,14 @@ async function start() {
     renderer.setRenderTarget(post.main);
     renderer.shadowMap.needsUpdate = true;
     renderer.render(scene, camera);
-    // (And into the mirror, whose target is another: else the first look from the air
-    // would stall while those are built.)
+    // (And into the mirror and the window, whose targets are others: else the first look
+    // from the air, or up from the water, would stall while those are built.)
     if (waterMirror) {
       waterMirror.setSize(post.main.width, post.main.height);
       waterMirror.render(scene, camera, camera.position.y - 1, surfaceMaterial);
       waterMirror.off();
+      waterWindow.render(scene, camera.position, surfaceMaterial);
+      waterWindow.off();
     }
     mark("compiled");
     await photosLoaded();

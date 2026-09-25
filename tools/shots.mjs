@@ -56,8 +56,10 @@ if (only) query.set("only", only);
 if (args.includes("--webgl")) query.set("webgl", "");
 if (args.includes("--stages")) query.set("stages", "");
 if (args.includes("--smoke")) query.set("smoke", "");
-for (const flag of ["fixsun", "nomirror", "noamb", "costs"]) if (args.includes(`--${flag}`)) query.set(flag, "");
+for (const flag of ["fixsun", "nomirror", "noamb", "costs", "dumpwindow"]) if (args.includes(`--${flag}`)) query.set(flag, "");
 if (option("quality")) query.set("q", option("quality"));
+// (--xname[=value]: passed on as ?xname=value, for a switch tried out in the game's code.)
+for (const a of args) if (a.startsWith("--x")) query.set(a.slice(2).split("=")[0], a.split("=")[1] ?? "");
 if (option("probe")) query.set("probe", option("probe"));
 if (option("render")) query.set("render", option("render"));
 const url = `http://localhost:${port}/?${query}`;

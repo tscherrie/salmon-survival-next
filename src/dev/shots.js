@@ -56,7 +56,9 @@ const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve))
 // The address of one point: the game with its settings, the run's name, the point's name.
 export function shotURL(set, shot, extra = "") {
   const here = new URLSearchParams(location.search);
-  for (const flag of ["stages", "webgl", "smoke", "fixsun", "nomirror", "noamb", "costs"]) if (here.has(flag)) extra += `&${flag}`;
+  for (const flag of ["stages", "webgl", "smoke", "fixsun", "nomirror", "noamb", "costs", "dumpwindow"]) if (here.has(flag)) extra += `&${flag}`;
+  // (And any ?x... switch being tried out.)
+  for (const [k, v] of here) if (k.startsWith("x")) extra += `&${k}=${v}`;
   if (here.get("probe")) extra += `&probe=${here.get("probe")}`;
   if (here.get("render")) extra += `&render=${here.get("render")}`;
   // (A run at another quality: ?shots=set&q=eco.)
@@ -230,6 +232,32 @@ async function costs(salmon) {
   return Object.fromEntries(Object.entries(out).sort((a, b) => b[1] - a[1]));
 }
 
+// The window's cube laid out as a cross (?dumpwindow), to see what the surface shows from
+// below: +y on top, then -x +z +x -z round the middle, -y at the bottom.
+async function dumpWindow(salmon, name) {
+  const { windowTarget } = await import("../render/mirror.js");
+  const size = windowTarget.width;
+  const canvas = Object.assign(document.createElement("canvas"), { width: size * 4, height: size * 3 });
+  const g = canvas.getContext("2d");
+  const half = (h) => {
+    const s = h & 0x8000 ? -1 : 1, e = (h >> 10) & 0x1f, f = h & 0x3ff;
+    return s * (e ? Math.pow(2, e - 15) * (1 + f / 1024) : Math.pow(2, -14) * (f / 1024));
+  };
+  const at = { 0: [2, 1], 1: [0, 1], 2: [1, 0], 3: [1, 2], 4: [1, 1], 5: [3, 1] };
+  for (let face = 0; face < 6; face++) {
+    const data = await salmon.renderer.readRenderTargetPixelsAsync(windowTarget, 0, 0, size, size, 0, face);
+    const image = g.createImageData(size, size);
+    for (let i = 0; i < size * size; i++)
+      for (let c = 0; c < 3; c++) {
+        const v = half(data[i * 4 + c]);
+        image.data[i * 4 + c] = 255 * Math.pow(v / (1 + v), 1 / 2.2);
+      }
+    for (let i = 0; i < size * size; i++) image.data[i * 4 + 3] = 255;
+    g.putImageData(image, at[face][0] * size, at[face][1] * size);
+  }
+  await fetch(`/__capture/${name}-window`, { method: "POST", body: canvas.toDataURL("image/png") });
+}
+
 // Which graphics card drew it (a software renderer would make the timings meaningless).
 function gpuName(renderer) {
   const info = renderer.backend?.adapter?.info;
@@ -314,6 +342,7 @@ export async function runShots(salmon, query) {
   numbers.frame = await throughput(salmon);
   if (query.has("stages")) numbers.stages = await stages(salmon);
   if (query.has("costs")) numbers.costs = await costs(salmon);
+  if (query.has("dumpwindow")) await dumpWindow(salmon, `${set}/${shot.name}`);
   await salmon.capture(`${set}/${shot.name}`, 1600, 900, { render: Number(query.get("render")) || 1 });
   const report = {
     name: shot.name,

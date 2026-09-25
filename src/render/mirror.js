@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { texture, uniform } from "three/tsl";
+import { cubeTexture, texture, uniform } from "three/tsl";
 
 // The river mirrors the world above it. Seen from the air at a low angle the banks, the
 // trees and a bridge are what the water shows, far more than the sky -- and most of that is
@@ -13,9 +13,14 @@ import { texture, uniform } from "three/tsl";
 export const mirrorMap = texture(new THREE.Texture());
 export const mirrorOn = uniform(0);
 
-// Under the water and never above it: not drawn into the mirror (the clip plane would cut
-// them away anyway, but only after their vertices were worked out).
-const SUNKEN = /^(Bed|Plants|Cobbles|Gravel|Food|Eggs|Moon jellies|Laichlachs school|minnow|grayling|troutParr)/;
+// Under the water and never above it: not drawn into the mirror or the window (the clip
+// plane would cut them away anyway, but only after their vertices were worked out). Not
+// the bed, which holds the banks; the plants, though the grass on the banks is among them:
+// the weed under the water is by far the most of them.
+const SUNKEN = /^(Plants|Cobbles|Gravel|Food|Eggs|Moon jellies|Laichlachs school|minnow|grayling|troutParr)/;
+// ...and in the window not the white water of a fall either: layer on layer of spray and
+// mist, dear to draw, and from under the water the fall is right there to see anyway.
+const SUNKEN_OR_FALLING = new RegExp(`${SUNKEN.source}|^(Fall|Plunge|Foam|Spray|Plume|Mist)`);
 
 export function createMirror(renderer, { scale = 0.5 } = {}) {
   const target = new THREE.RenderTarget(1, 1, { type: THREE.HalfFloatType });
@@ -27,7 +32,6 @@ export function createMirror(renderer, { scale = 0.5 } = {}) {
   const flip = new THREE.Matrix4();
   const mirrored = new THREE.Matrix4();
   const swap = new THREE.Matrix4().makeScale(-1, 1, 1);
-  const hidden = [];
 
   function setSize(width, height) {
     target.setSize(Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)));
@@ -61,22 +65,71 @@ export function createMirror(renderer, { scale = 0.5 } = {}) {
     m[14] = plane.w;
     virtual.projectionMatrixInverse.copy(virtual.projectionMatrix).invert();
 
-    hidden.length = 0;
-    scene.traverse((object) => {
-      if (object.visible && SUNKEN.test(object.name)) {
-        hidden.push(object);
-        object.visible = false;
-      }
+    aboveOnly(scene, surfaceMaterial, SUNKEN, () => {
+      const current = renderer.getRenderTarget();
+      renderer.setRenderTarget(target);
+      renderer.render(scene, virtual);
+      renderer.setRenderTarget(current);
     });
-    surfaceMaterial.visible = false;
-    const current = renderer.getRenderTarget();
-    renderer.setRenderTarget(target);
-    renderer.render(scene, virtual);
-    renderer.setRenderTarget(current);
-    surfaceMaterial.visible = true;
-    for (const object of hidden) object.visible = true;
     mirrorOn.value = 1;
   }
 
   return { target, setSize, render, off: () => (mirrorOn.value = 0) };
+}
+
+// The window: from under the water the whole sky and the banks round it are squeezed into
+// a circle overhead (Snell's window), rimmed by the mirror of the river. What shows in it
+// is drawn into a small cube round the point of the surface over the eye, one face every
+// other frame (the one overhead most often; the one below never, the window cannot see
+// down) -- what is above changes slowly, and each drawing of the scene costs a millisecond.
+export const windowTarget = new THREE.CubeRenderTarget(256, { type: THREE.HalfFloatType });
+windowTarget.texture.name = "Window";
+export const windowMap = cubeTexture(windowTarget.texture);
+export const windowOn = uniform(0);
+const ROUND = [2, 0, 2, 1, 2, 4, 2, 5];
+
+export function createWindow(renderer) {
+  const cube = new THREE.CubeCamera(0.05, 900, windowTarget);
+  let turn = 0;
+
+  // Draw the window's cube at `at` (just over the water); every face when it has none yet.
+  function render(scene, at, surfaceMaterial) {
+    if (cube.coordinateSystem !== renderer.coordinateSystem) {
+      cube.coordinateSystem = renderer.coordinateSystem;
+      cube.updateCoordinateSystem();
+    }
+    cube.position.copy(at);
+    cube.updateMatrixWorld(true);
+    if (windowOn.value && turn++ % 2) return;
+    const faces = windowOn.value ? [ROUND[(turn >> 1) % ROUND.length]] : [2, 0, 1, 4, 5];
+    aboveOnly(scene, surfaceMaterial, SUNKEN_OR_FALLING, () => {
+      const current = renderer.getRenderTarget();
+      const face = renderer.getActiveCubeFace();
+      const level = renderer.getActiveMipmapLevel();
+      for (const f of faces) {
+        renderer.setRenderTarget(windowTarget, f);
+        renderer.render(scene, cube.children[f]);
+      }
+      renderer.setRenderTarget(current, face, level);
+    });
+    windowOn.value = 1;
+  }
+
+  return { render, off: () => (windowOn.value = 0) };
+}
+
+// Draw with what is only ever under the water (by name), and the surface itself, left out.
+const hidden = [];
+function aboveOnly(scene, surfaceMaterial, leaveOut, draw) {
+  hidden.length = 0;
+  scene.traverse((object) => {
+    if (object.visible && leaveOut.test(object.name)) {
+      hidden.push(object);
+      object.visible = false;
+    }
+  });
+  surfaceMaterial.visible = false;
+  draw();
+  surfaceMaterial.visible = true;
+  for (const object of hidden) object.visible = true;
 }

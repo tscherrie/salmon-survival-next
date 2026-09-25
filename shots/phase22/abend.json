@@ -1,0 +1,34 @@
+{
+  "name": "abend",
+  "set": "phase22",
+  "renderer": "webgpu",
+  "three": "186",
+  "gpuName": "unknown",
+  "size": [
+    1600,
+    900
+  ],
+  "screen": [
+    1600,
+    813,
+    1
+  ],
+  "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+  "when": "2026-09-25T20:44:24.798Z",
+  "gpu": {
+    "median": 67.63,
+    "p90": 69.14,
+    "n": 80
+  },
+  "cpu": {
+    "median": 4.6,
+    "p90": 5,
+    "n": 80
+  },
+  "calls": 292,
+  "triangles": 3159164,
+  "programs": 207,
+  "textures": 47,
+  "geometries": 395,
+  "frame": 9.68
+}

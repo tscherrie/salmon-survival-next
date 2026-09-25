@@ -1,0 +1,34 @@
+{
+  "name": "brutbecken",
+  "set": "p22",
+  "renderer": "webgpu",
+  "three": "186",
+  "gpuName": "unknown",
+  "size": [
+    1600,
+    900
+  ],
+  "screen": [
+    1600,
+    813,
+    1
+  ],
+  "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+  "when": "2026-09-25T20:18:50.234Z",
+  "gpu": {
+    "median": 46.07,
+    "p90": 51.12,
+    "n": 80
+  },
+  "cpu": {
+    "median": 4.8,
+    "p90": 5.6,
+    "n": 80
+  },
+  "calls": 264,
+  "triangles": 3838142,
+  "programs": 156,
+  "textures": 47,
+  "geometries": 336,
+  "frame": 10.49
+}
