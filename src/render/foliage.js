@@ -37,6 +37,7 @@ import {
   sign,
   sin,
   smoothstep,
+  uniform,
   uv,
   varying,
   varyingProperty,
@@ -94,12 +95,26 @@ function strandMotion(root, direction, s, compliance, stir) {
 // displacement, more toward the free end, and never along its own length. Also hands the
 // bent normal (view space) and the strand's thinness to the fragment stage.
 const vLeafNormal = varyingProperty("vec3", "vLeafNormal");
+// How much of a block's plants are kept at a distance from the eye: all of them near, then
+// fewer and fewer, down to three in ten far off, where the haze hides the rest anyway. Each
+// plant fades out over the last PLANT_FADE of its share (by its rank, terrain.js plantLod),
+// dithered, so the weed thins over some metres instead of popping at a boundary.
+export const PLANT_FADE = 0.1;
+export const plantShare = (d) => Math.min(1, Math.max(0.3, 1 - (d - 40) * 0.0125));
+const vPlantFade = varyingProperty("float", "vPlantFade");
+// (From the eye, set each frame by main.js: in the sun's shadow pass the camera is the
+// sun's, and a plant must not lose its shadow by its distance from that.)
+export const plantEye = uniform(new THREE.Vector3());
 function strandPosition() {
   const anchor = attribute("anchor", "vec3");
   const bend = attribute("bend", "vec4");
   const along = attribute("along", "vec4");
   return Fn(() => {
     const position = positionGeometry;
+    const root = modelWorldMatrix.mul(vec4(anchor, 1)).xyz;
+    const share = float(1).sub(length(root.sub(plantEye)).sub(40).mul(0.0125)).clamp(0.3, 1);
+    const fade = smoothstep(0, PLANT_FADE, share.sub(attribute("thin", "vec2").y));
+    vPlantFade.assign(fade);
     const stir = flowAt(position);
     const motion = strandMotion(anchor, bend.xyz, along.w, bend.w, stir.a);
     const n = normalize(normalGeometry.sub(along.xyz.mul(motion.y.mul(dot(bend.xyz, normalGeometry)))));
@@ -116,7 +131,8 @@ function strandPosition() {
     If(rest.y.lessThan(ceiling), () => {
       moved.y.assign(min(moved.y, ceiling.sub(rest.y).add(position.y)));
     });
-    return moved;
+    // A plant faded out altogether is folded into its root: no pixels at all.
+    return select(fade.greaterThan(0), moved, anchor);
   })();
 }
 
@@ -135,7 +151,7 @@ export function foliageMaterial() {
   // temporal resolve to average into a soft transparency (there is no multisampling).
   material.alphaHash = true;
   material.positionNode = strandPosition();
-  const thin = attribute("thin", "float");
+  const thin = attribute("thin", "vec2").x;
   const leafUv = uv();
   material.colorNode = Fn(() => {
     const base = attribute("color", "vec3").toVar();
@@ -158,6 +174,7 @@ export function foliageMaterial() {
     If(abs(thin.sub(0.12)).greaterThan(0.005), () => {
       alpha.mulAssign(smoothstep(0.35, 1.5, length(positionWorld.sub(cameraPosition))));
     });
+    alpha.mulAssign(vPlantFade);
     return vec4(base, alpha);
   })();
   // The rib and veins in relief, from their height's change across the pixel.

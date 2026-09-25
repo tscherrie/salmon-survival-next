@@ -69,7 +69,9 @@ export class GeometryBatch {
     const { direction, tangent, distance, compliance } = strand;
     this.bend.push(direction.x, direction.y, direction.z, compliance);
     this.along.push(tangent.x, tangent.y, tangent.z, distance);
-    this.thin.push(thin);
+    // (With a second number beside it: the plant's rank among a block's plants, for fading
+    // it out with distance -- set later, by the terrain's plantLod.)
+    this.thin.push(thin, 0);
     return i;
   }
   quad(a, b, c, d) {
@@ -86,7 +88,7 @@ export class GeometryBatch {
     g.setAttribute("anchor", new THREE.Float32BufferAttribute(this.anchors, 3));
     g.setAttribute("bend", new THREE.Float32BufferAttribute(this.bend, 4));
     g.setAttribute("along", new THREE.Float32BufferAttribute(this.along, 4));
-    g.setAttribute("thin", new THREE.Float32BufferAttribute(this.thin, 1));
+    g.setAttribute("thin", new THREE.Float32BufferAttribute(this.thin, 2));
     g.setIndex(this.indices);
     g.computeVertexNormals();
     return g;

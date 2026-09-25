@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { rockGeometry } from "./render/geometry.js";
 import { GeometryBatch, randomGenerator } from "./render/geometry.js";
-import { foliageMaterial } from "./render/foliage.js";
+import { PLANT_FADE, foliageMaterial, plantShare } from "./render/foliage.js";
 import { FALLS, MILLS, S, TRIBUTARIES, bedDetail, current, frame, level, passSlot, place, section, smooth, tributaryAt } from "./course.js";
 import { SolidBatch } from "./flora.js";
 import { TreeBatch, birch, fallenTrunk, fern, forestMaterial, juniper, pine, shrub, spruce, stump } from "./forest.js";
@@ -11,6 +11,9 @@ import { inClearing } from "./clearings.js";
 // Every plant put into a block's batch is remembered as a piece -- its run of indices -- so
 // that a block far off can draw only some of its plants (plantLod below): the weed thins out
 // with distance, where the haze hides it anyway, and the nearest blocks keep every blade.
+// Each plant has a rank, its place in a random order (the big ones early), and it fades out
+// by distance past the share of plants kept there (foliage.js, plantShare): so a plant
+// dissolves or grows in over some metres instead of popping at a boundary.
 const piece =
   (fn) =>
   (batch, ...args) => {
@@ -40,8 +43,9 @@ const algae = piece(flora.algae),
   horsetail = piece(flora.horsetail),
   burReed = piece(flora.burReed);
 // Reorders a batch's indices so that its plants come in a random order, the big ones early,
-// and returns how many indices hold the first 30 % and the first 60 % of them.
-const PLANT_LOD = [0.3, 0.6];
+// writes each plant's rank (0 first, toward 1 last) beside its thinness, and returns how
+// many indices hold the first twentieth of them, the first two twentieths, and so on.
+const LOD_STEPS = 20;
 function plantLod(batch) {
   const pieces = batch.pieces ?? [];
   const src = batch.indices;
@@ -54,26 +58,30 @@ function plantLod(batch) {
   }
   order.sort((a, b) => a[0] - b[0]);
   const out = [];
-  const marks = [];
+  const marks = [0];
   const covered = new Uint8Array(src.length);
   for (let i = 0; i < order.length; i++) {
     const k = order[i][1];
+    const rank = i / Math.max(1, order.length);
     for (let j = pieces[2 * k]; j < pieces[2 * k + 1]; j++) {
       out.push(src[j]);
       covered[j] = 1;
+      batch.thin[2 * src[j] + 1] = rank;
     }
-    while (marks.length < PLANT_LOD.length && (i + 1) / order.length >= PLANT_LOD[marks.length]) marks.push(out.length);
+    while (marks.length <= LOD_STEPS && (i + 1) / order.length >= marks.length / LOD_STEPS) marks.push(out.length);
   }
-  while (marks.length < PLANT_LOD.length) marks.push(out.length);
+  while (marks.length <= LOD_STEPS) marks.push(out.length);
   for (let j = 0; j < src.length; j++) if (!covered[j]) out.push(src[j]);
   batch.indices = out;
   return marks;
 }
-// How much of a block's weed to draw at a distance (from the block's edge).
+// How much of a block's weed to draw at a distance (from the block's edge): every plant
+// the nearest of it could still show (foliage.js fades the rest out plant by plant).
 function lodPlants(mesh, d) {
   const marks = mesh.userData.lod;
   if (!marks) return;
-  const count = d < 45 ? Infinity : d < 90 ? marks[1] : marks[0];
+  const share = Math.min(1, plantShare(d) + PLANT_FADE);
+  const count = share >= 1 ? Infinity : marks[Math.ceil(share * LOD_STEPS)];
   if (mesh.geometry.drawRange.count !== count) mesh.geometry.setDrawRange(0, count);
 }
 

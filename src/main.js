@@ -6,7 +6,7 @@ import { createCaustics, driftSurface } from "./render/caustics.js";
 import { createRipples } from "./render/ripples.js";
 import { createPost } from "./render/post.js";
 import { softShadowFilter, shadowFrame } from "./render/shadows.js";
-import { foliageSky } from "./render/foliage.js";
+import { foliageSky, plantEye } from "./render/foliage.js";
 import { renderSettings } from "./render/policy.js";
 import { createDaylight } from "./daylight.js";
 import { framebufferSize, qualityName } from "../../shared/render-policy.js";
@@ -2520,6 +2520,7 @@ async function start() {
       waterMirror.render(scene, camera, lv, surfaceMaterial);
       key.shadow.autoUpdate = false;
     } else waterMirror?.off();
+    plantEye.value.copy(camera.position);
     renderer.setRenderTarget(post.main);
     prof.mark("draw-prep");
     renderer.render(scene, camera);
