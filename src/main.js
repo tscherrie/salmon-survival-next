@@ -70,6 +70,14 @@ const dev = ["capture", "diagnostics", "stage", "at", "pace", "season", "year"].
 // laid out for a small screen held sideways.
 const touchMode = query.has("touch") || (!dev && !isDesktop());
 if (touchMode) habitat.classList.add("touch");
+const QUALITY_KEY = "salmon-quality";
+function storedQuality() {
+  try {
+    return localStorage.getItem(QUALITY_KEY);
+  } catch {
+    return null;
+  }
+}
 function savedStageName() {
   const saved = savedStage();
   if (!saved || !STAGES[saved.stage]) return null;
@@ -82,7 +90,9 @@ async function start() {
   performance.mark("salmon:start");
   // The title card goes up at once and waits for the river to be built.
   const intro = dev ? null : showIntro({ resume: savedStageName() });
-  const profile = qualityName(query.get("quality") || (touchMode ? "balanced" : "detail"));
+  // The graphics quality: ?quality= in the address, else what the player chose (the G button,
+  // below), else Detail on a computer and Balanced on a phone.
+  const profile = qualityName(query.get("quality") || storedQuality() || (touchMode ? "balanced" : "detail"));
   // The game's budget: the full-detail look, but the shafts marched in fewer, jittered
   // steps (the temporal blend smooths them just as well) and at most ~2.4 million pixels
   // drawn -- the rest is filled in by the upscale, and the frame rate is what matters here.
@@ -92,6 +102,8 @@ async function start() {
   const gameSettings = () => {
     const base = renderSettings({ profile, pixelRatio: devicePixelRatio });
     if (touchMode) return { ...base, resolution: Math.min(devicePixelRatio || 1, 3), shaftSteps: Math.min(base.shaftSteps, 10), maxPixels: 3.7e6, shadowSize: Math.min(base.shadowSize, 1024) };
+    // Ultra: every pixel of the screen, and the shafts a little denser.
+    if (profile === "ultra") return { ...base, shaftSteps: Math.min(base.shaftSteps, 32) };
     return { ...base, shaftSteps: Math.min(base.shaftSteps, 24), maxPixels: Math.min(base.maxPixels, 2.4e6) };
   };
   let settings = gameSettings();
@@ -423,6 +435,28 @@ async function start() {
     loreButton.blur();
   });
   showLore();
+  // Graphics quality: the button, or G, steps through low, medium, high and ultra. The
+  // renderer is set up for one quality, so the fish is saved and the game loaded afresh.
+  const QUALITY_ORDER = ["eco", "balanced", "detail", "ultra"];
+  const QUALITY_NAMES = { eco: "Niedrig", balanced: "Mittel", detail: "Hoch", ultra: "Ultra" };
+  const qualityButton = document.querySelector("#quality-toggle");
+  qualityButton.querySelector(".value").textContent = translate(QUALITY_NAMES[profile]);
+  function cycleQuality() {
+    const next = QUALITY_ORDER[(QUALITY_ORDER.indexOf(profile) + 1) % QUALITY_ORDER.length];
+    try {
+      localStorage.setItem(QUALITY_KEY, next);
+    } catch {}
+    hud.note(`Grafik: ${QUALITY_NAMES[next]} …`);
+    persist();
+    const url = new URL(location.href);
+    url.searchParams.delete("quality");
+    setTimeout(() => location.replace(url.toString()), 350);
+  }
+  qualityButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    cycleQuality();
+    qualityButton.blur();
+  });
 
   const held = new Set();
   const look = { yaw: fish.yaw, pitch: 0 };
@@ -453,6 +487,10 @@ async function start() {
     }
     if (event.code === "KeyI" && !event.repeat) {
       toggleLore();
+      return;
+    }
+    if (event.code === "KeyG" && !event.repeat) {
+      cycleQuality();
       return;
     }
     if (event.code === "KeyF" && !event.repeat) {

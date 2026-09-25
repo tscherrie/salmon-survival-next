@@ -13,6 +13,8 @@ export const QUALITY_PRESETS = Object.freeze({
   eco: Object.freeze({ fps: 20, pixels: 1050000, dpr: 1 }),
   balanced: Object.freeze({ fps: 30, pixels: 1800000, dpr: 1.25 }),
   detail: Object.freeze({ fps: 60, pixels: 3000000, dpr: 1.5 }),
+  // Every pixel of a Retina or 4K screen, for a strong graphics card.
+  ultra: Object.freeze({ fps: 60, pixels: 8300000, dpr: 2 }),
 });
 
 export function qualityName(value) {

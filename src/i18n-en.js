@@ -169,6 +169,12 @@ const PAIRS = [
   ["Logbuch (L)", "Logbook (L)"],
   ["Karte", "Map"],
   ["Ton", "Sound"],
+  ["Grafik", "Graphics"],
+  ["Grafik ändern", "Change graphics"],
+  ["Grafik (G)", "Graphics (G)"],
+  ["Niedrig", "Low"],
+  ["Mittel", "Medium"],
+  ["Hoch", "High"],
   ["Geschichten und Fakten", "Stories and facts"],
   ["Geschichten und Fakten (I)", "Stories and facts (I)"],
   ["Geschichten und Fakten an", "Stories and facts on"],
@@ -506,6 +512,7 @@ export const EN = Object.fromEntries(PAIRS);
 // Texts with something put into them: [pattern, English] ($1… are translated in turn), or
 // [pattern, function].
 export const EN_PATTERNS = [
+  [/^Grafik: (.+) …$/, "Graphics: $1 …"],
   [/^(.+) jagt dich!$/, "$1 is hunting you!"],
   [/^Erbe: (.+) \(\+(\d+) %\)$/, "Heritage: $1 (+$2 %)"],
   [/^(.+) \+(\d+) %$/, "$1 +$2 %"],

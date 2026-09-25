@@ -168,6 +168,13 @@ const PAIRS = [
   ["Map (M)", "マップ (M)"],
   ["Logbook (L)", "日誌 (L)"],
   ["Sound", "サウンド"],
+  ["Graphics", "画質"],
+  ["Change graphics", "画質を変更"],
+  ["Graphics (G)", "画質 (G)"],
+  ["Low", "低"],
+  ["Medium", "中"],
+  ["High", "高"],
+  ["Ultra", "最高"],
   ["Stories and facts", "物語と豆知識"],
   ["Stories and facts (I)", "物語と豆知識 (I)"],
   ["Stories and facts on", "物語と豆知識：オン"],
@@ -504,6 +511,7 @@ export const JA = Object.fromEntries(PAIRS);
 
 // On the German, like EN_PATTERNS; $1… are translated in turn.
 export const JA_PATTERNS = [
+  [/^Grafik: (.+) …$/, "画質：$1 …"],
   [/^(.+) jagt dich!$/, "$1 に狙われている！"],
   [/^Erbe: (.+) \(\+(\d+) %\)$/, "受け継いだもの：$1（+$2%）"],
   [/^(.+) \+(\d+) %$/, "$1 +$2%"],

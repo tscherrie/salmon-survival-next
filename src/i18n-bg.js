@@ -168,6 +168,13 @@ const PAIRS = [
   ["Map (M)", "Карта (M)"],
   ["Logbook (L)", "Дневник (L)"],
   ["Sound", "Звук"],
+  ["Graphics", "Графика"],
+  ["Change graphics", "Смяна на графиката"],
+  ["Graphics (G)", "Графика (G)"],
+  ["Low", "Ниска"],
+  ["Medium", "Средна"],
+  ["High", "Висока"],
+  ["Ultra", "Ултра"],
   ["Stories and facts", "Истории и факти"],
   ["Stories and facts (I)", "Истории и факти (I)"],
   ["Stories and facts on", "Истории и факти: вкл."],
@@ -504,6 +511,7 @@ export const BG = Object.fromEntries(PAIRS);
 
 // On the German, like EN_PATTERNS; $1… are translated in turn.
 export const BG_PATTERNS = [
+  [/^Grafik: (.+) …$/, "Графика: $1 …"],
   [/^(.+) jagt dich!$/, "$1 те преследва!"],
   [/^Erbe: (.+) \(\+(\d+) %\)$/, "Наследство: $1 (+$2 %)"],
   [/^(.+) \+(\d+) %$/, "$1 +$2 %"],

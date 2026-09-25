@@ -55,6 +55,23 @@ export const PROFILES = Object.freeze({
     detail: true,
     powerPreference: 'high-performance',
   }),
+  // As Detail, at full screen resolution, with denser shafts and contact shading.
+  ultra: Object.freeze({
+    name: 'ultra',
+    taa: true,
+    shadowSize: 4096,
+    shadowHz: Infinity,
+    batteryShadowHz: Infinity,
+    aoSamples: 16,
+    shaftSteps: 40,
+    reflections: true,
+    backgroundDensity: 1,
+    backgroundRows: 30,
+    backgroundCols: 3,
+    lawnDensity: 30,
+    detail: true,
+    powerPreference: 'high-performance',
+  }),
   reference: Object.freeze({
     name: 'reference',
     taa: true,

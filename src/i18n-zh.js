@@ -168,6 +168,13 @@ const PAIRS = [
   ["Map (M)", "地图 (M)"],
   ["Logbook (L)", "日志 (L)"],
   ["Sound", "声音"],
+  ["Graphics", "画质"],
+  ["Change graphics", "更改画质"],
+  ["Graphics (G)", "画质 (G)"],
+  ["Low", "低"],
+  ["Medium", "中"],
+  ["High", "高"],
+  ["Ultra", "极高"],
   ["Stories and facts", "故事与知识"],
   ["Stories and facts (I)", "故事与知识 (I)"],
   ["Stories and facts on", "故事与知识：开"],
@@ -504,6 +511,7 @@ export const ZH = Object.fromEntries(PAIRS);
 
 // On the German, like EN_PATTERNS; $1… are translated in turn.
 export const ZH_PATTERNS = [
+  [/^Grafik: (.+) …$/, "画质：$1 …"],
   [/^(.+) jagt dich!$/, "$1 在追你！"],
   [/^Erbe: (.+) \(\+(\d+) %\)$/, "遗传：$1（+$2%）"],
   [/^(.+) \+(\d+) %$/, "$1 +$2%"],
