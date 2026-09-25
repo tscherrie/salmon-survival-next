@@ -911,7 +911,7 @@ export const COATS = {
   },
   fry: {
     back: [0.05, 0.05, 0.028], flank: [0.2, 0.17, 0.1], belly: [0.5, 0.46, 0.38],
-    silver: 0.12, parr: 0.5, redSpots: 0.25, blackSpots: 0.25, spotSize: 0.6, halo: 0, bars: 0, pikeSpots: 0,
+    silver: 0.12, parr: 0.85, redSpots: 0.35, blackSpots: 0.25, spotSize: 0.6, halo: 0, bars: 0, pikeSpots: 0,
     spawn: 0, translucent: 0.5, fin: [0.2, 0.18, 0.13], finDark: 0, adipose: [0.45, 0.22, 0.1], iris: [0.5, 0.42, 0.22], yolk: 0,
   },
   parr: {
@@ -1328,10 +1328,14 @@ function shadeFish(materials, body, membranes) {
       // Young fish pass light: warm through the thin tail and fins, pink round the gills. The
       // path through the body in millimetres: a small fish passes light, a big one hardly.
       const thin = max(abs(vSkinPoint.z).mul(2), 0.006).mul(vFishScale).mul(100);
+      // (What comes through has passed the pigment on its way: a dark back and the parr
+      // marks let little by, the pale belly much.)
+      const pigment = skin.mul(2.4).clamp(0, 1);
       gThrough.assign(
         exp(vec3(0.55, 1.35, 1.75).mul(thin).negate())
           .mul(exp(thin.mul(-2.6)).oneMinus())
           .mul(u.coat_translucent.mul(1.4).add(0.35))
+          .mul(pigment)
           .add(vec3(0.25, 0.06, 0.04).mul(gauss(x.sub(0.2), 0.03)).mul(u.coat_translucent)),
       );
       skin.assign(mix(skin, skin.mul(0.6).add(vec3(0.2, 0.14, 0.11)), u.coat_translucent.mul(0.4)));

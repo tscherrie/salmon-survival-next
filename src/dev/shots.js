@@ -41,6 +41,11 @@ export const SHOTS = [
   { name: "wasserlinie", stage: "parr", at: 4250, season: "summer", hour: 16, view: { eye: [-4, 0, -0.005], target: [20, 0, 0.6] } },
   // Just come up out of the water: the glass wet, the film running off it, drops.
   { name: "nass", stage: "parr", at: 4250, season: "summer", hour: 16, view: { eye: [-6, 0, 0.5], target: [20, 0, 1.5] }, wet: 0.25 },
+  // Close looks at the fish: a fry among the stones, a smolt in the school, a spawner in
+  // its red coat (skin, fins, eye).
+  { name: "brut-nah", stage: "fry", at: 240, season: "summer", hour: 13, closeup: [0.95, 0.2, 0.15] },
+  { name: "smolt-nah", stage: "smolt", at: 11790, season: "spring", hour: 12, closeup: [0.95, 0.2, 0.15] },
+  { name: "lachs-nah", stage: "spawner", at: 5150, season: "autumn", hour: 12, closeup: [0.95, 0.2, 0.15] },
   // The stone bridge from the water: arches, piers, people on it.
   { name: "bruecke", stage: "smolt", at: 11790, season: "spring", hour: 14, view: { eye: [-26, 0, 1.2], target: [10, 0, 3] } },
   // The lower river: brown peat water, a slow deep reach.
@@ -319,8 +324,23 @@ export async function runShots(salmon, query) {
     await salmon.run(0.05);
     await salmon.settle(20);
   }
+  // A close look at the fish itself: closeup is [aside, above, ahead] in fish lengths, from
+  // the fish in its own frame (aside to its left), looking at it.
+  if (shot.closeup) {
+    const { THREE, fish } = salmon;
+    const L = fish.length;
+    const heading = fish.heading.clone().setY(0).normalize();
+    const left = new THREE.Vector3(0, 1, 0).cross(heading).normalize();
+    const [aside, above, ahead] = shot.closeup;
+    const eye = fish.position.clone().addScaledVector(left, aside * L).addScaledVector(heading, ahead * L);
+    eye.y += above * L;
+    const target = fish.position.clone().addScaledVector(heading, 0.05 * L);
+    salmon.view(eye.toArray(), target.toArray(), L * 0.02);
+    await salmon.run(0.05);
+  }
   if (shot.wet !== undefined) salmon.wetLens(shot.wet);
   salmon.pause(true);
+
   // (?xhide=regex: the parts of the scene whose names match left out, to find what is what.)
   if (query.get("xhide")) {
     const hide = new RegExp(query.get("xhide"));
