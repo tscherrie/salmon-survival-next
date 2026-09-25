@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { randomGenerator } from "./render/geometry.js";
-import { waterLit } from "./render/water.js";
+import { river, waterLit, waterTime } from "./render/water.js";
 import { placeOwnInstances } from "./render/instancing.js";
 import { PointCloud, perPoint } from "./materials.js";
-import { waterBetween } from "./render/fog.js";
+import { fogNodes, waterBetween } from "./render/fog.js";
 import {
   Fn,
   If,
@@ -28,6 +28,7 @@ import {
   pow,
   sin,
   smoothstep,
+  step,
   uniform,
   uv,
   varying,
@@ -1381,6 +1382,12 @@ function createHunters(scene, { detail }) {
 // Specks in the water round the camera -- silt, plankton, bits of leaf -- that make the water
 // itself visible and show how fast it is going. They live in a box round the camera, sized
 // to the fish, and wrap round it.
+//
+// Most are fine silt, lit the colour of the water round them (grey-green in the brook, brown
+// in the peat water, blue in the sea); some are flakes of leaf and peat, longer than wide,
+// tumbling as they go and thinning to a sliver when turned edge-on; a few are plankton that
+// catch the light. And like any speck in water they scatter light mostly forward: looking
+// toward the sun through them they light up, looking away they are dim.
 function createMotes(scene, { count = 2200 } = {}) {
   const random = randomGenerator(8812);
   const positions = new Float32Array(count * 3);
@@ -1392,18 +1399,34 @@ function createMotes(scene, { count = 2200 } = {}) {
     seeds[i * 3 + 2] = random();
     sizes[i] = 0.4 + random() * random() * 2.2;
   }
+  const kinds = new Float32Array(count).map(randomGenerator(8813));
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("size", new THREE.BufferAttribute(sizes, 1));
+  geometry.setAttribute("kind", new THREE.BufferAttribute(kinds, 1));
   const light = uniform(1),
     grain = uniform(0.02);
   const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, sizeAttenuation: true });
   material.positionNode = perPoint(geometry, "position");
-  material.scaleNode = perPoint(geometry, "size").mul(grain);
   {
+    const kind = perPoint(geometry, "kind");
+    const flake = step(0.7, kind);
+    const spark = step(kind, 0.05);
+    // A flake tumbles, each its own way and speed, and seen edge-on it is a sliver.
+    material.rotationNode = waterTime.mul(kind.sub(0.85).mul(4)).add(kind.mul(71)).mul(flake);
+    const edgeOn = abs(cos(waterTime.mul(kind.mul(2.2).sub(0.9)).add(kind.mul(53)))).mul(0.8).add(0.2);
+    // (Big enough to show as more than a pixel, which the temporal resolve would smooth away.)
+    const size = perPoint(geometry, "size").mul(grain).mul(2.2);
+    material.scaleNode = vec2(mix(1, 2.2, flake).mul(mix(1, edgeOn, flake)), mix(1, 0.8, flake)).mul(size).mul(mix(1, 0.55, spark));
     const near = smoothstep(grain.mul(4), grain.mul(16), length(positionWorld.sub(cameraPosition)));
-    material.colorNode = vec3(0.78, 0.8, 0.7).mul(light);
-    material.opacityNode = smoothstep(0.5, 0.15, length(uv().sub(0.5))).mul(0.32).mul(near);
+    const view = normalize(positionWorld.sub(cameraPosition));
+    const forward = pow(dot(view, river.lightDirection).clamp(0, 1), 8).mul(2.6).add(0.55);
+    const water = fogNodes().color;
+    const silt = water.mul(2.4).add(vec3(0.16, 0.16, 0.14));
+    const leaf = mix(vec3(0.3, 0.23, 0.13), water.mul(1.6), 0.35);
+    const colour = mix(mix(silt, leaf, flake), vec3(1.2, 1.25, 1.15), spark);
+    material.colorNode = colour.mul(light).mul(forward);
+    material.opacityNode = smoothstep(0.5, 0.15, length(uv().sub(0.5))).mul(mix(0.42, 0.62, flake)).mul(near);
   }
   material.uniforms = { scale: { value: 1 }, light, grain };
   const points = new PointCloud(geometry, material);
@@ -1411,7 +1434,7 @@ function createMotes(scene, { count = 2200 } = {}) {
   points.name = "Motes";
   scene.add(points);
   const flow = {};
-  const river = { s: 0, u: 0 };
+  const here = { s: 0, u: 0 };
   let box = 0;
   const origin = new THREE.Vector3();
   return {
@@ -1428,10 +1451,10 @@ function createMotes(scene, { count = 2200 } = {}) {
         }
         material.uniforms.grain.value = 0.004 + length * 0.007;
       }
-      locate(centre.x, centre.z, hintS, river);
-      current(river.s, river.u, centre.y, flow, time);
-      const lv = level(river.s);
-      const floor = bed(river.s, river.u);
+      locate(centre.x, centre.z, hintS, here);
+      current(here.s, here.u, centre.y, flow, time);
+      const lv = level(here.s);
+      const floor = bed(here.s, here.u);
       const half = box / 2;
       for (let i = 0; i < count; i++) {
         let vx = flow.vx,
