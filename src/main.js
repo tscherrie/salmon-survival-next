@@ -25,7 +25,7 @@ import { createSave, savedStage } from "./save.js";
 import { createSound } from "./sound.js";
 import { createPebbles } from "./pebbles.js";
 import { COATS, MODEL_LENGTH, createFishMesh } from "./anatomy.js";
-import { isDesktop, showIntro, showPhoneNotice } from "./intro.js";
+import { createQualityChoice, isDesktop, qualityName as qualityLabel, showIntro, showPhoneNotice } from "./intro.js";
 import { MONTHS, conditions, forceYear, thermal, updateConditions, waterTemperature } from "./seasons.js";
 import { createNets } from "./nets.js";
 import { CATALOGUE, createLogbook } from "./logbook.js";
@@ -94,13 +94,19 @@ async function start() {
   // How long the way to the title card's button takes, step by step (performance marks,
   // read back with performance.getEntriesByType("mark")).
   performance.mark("salmon:start");
+  // The graphics quality: ?quality= in the address, else what the player chose (on the card
+  // or at the graphics button, G -- setQuality below), else Detail on a computer and
+  // Balanced on a phone.
+  const recommended = touchMode ? "balanced" : "detail";
+  const profile = qualityName(query.get("quality") || storedQuality() || recommended);
+  const quality = createQualityChoice({ current: profile, recommended, touch: touchMode, onPick: (name) => setQuality(name) });
+  // Until the river is built, nothing to save; the corner buttons come in when they work.
+  let built = false;
+  habitat.classList.add("building");
   // The title card goes up at once and waits for the river to be built. (It is the pause as
   // well: P mid-swim shows it again, over the river as it is -- see setPaused below.)
   const title = !dev;
-  const intro = showIntro({ resume: savedStageName(), title, onResume: () => swimOn(), beforeReload: () => persist() });
-  // The graphics quality: ?quality= in the address, else what the player chose (the G button,
-  // below), else Detail on a computer and Balanced on a phone.
-  const profile = qualityName(query.get("quality") || storedQuality() || (touchMode ? "balanced" : "detail"));
+  const intro = showIntro({ resume: savedStageName(), title, quality, onResume: () => swimOn(), beforeReload: () => persist() });
   // The game's budget: the full-detail look, but the shafts marched in fewer, jittered
   // steps (the temporal blend smooths them just as well) and at most ~2.4 million pixels
   // drawn -- the rest is filled in by the upscale, and the frame rate is what matters here.
@@ -384,6 +390,7 @@ async function start() {
   // The logbook: open it and the swim waits.
   let releasing = false;
   function toggleLogbook() {
+    closeQuality();
     const open = logbook.toggle(fish, save.generation, heritageTraits());
     if (open) {
       releasing = true;
@@ -404,7 +411,10 @@ async function start() {
       freeThePointer();
       if (dead <= 0 && !fish.airborne) persist();
       intro.pause({ saved: stageLabel(fish.stage, save.generation), touch: touchMode });
-    } else intro.resume();
+    } else {
+      intro.resume();
+      closeQuality();
+    }
     sound.hush(value || logbook.open);
     held.clear();
     if (!value) last = performance.now();
@@ -469,28 +479,62 @@ async function start() {
     loreButton.blur();
   });
   showLore();
-  // Graphics quality: the button, or G, steps through low, medium, high and ultra. The
-  // renderer is set up for one quality, so the fish is saved and the game loaded afresh.
-  const QUALITY_ORDER = ["eco", "balanced", "detail", "ultra"];
-  const QUALITY_NAMES = { eco: "Niedrig", balanced: "Mittel", detail: "Hoch", ultra: "Ultra" };
+  // Graphics quality: the button, or G, opens a small panel beside it with the four steps
+  // (the same control as on the card, intro.js); a click outside it, Esc or G closes it.
+  // Mid-swim G pauses first, so the pointer is free to choose.
   const qualityButton = document.querySelector("#quality-toggle");
-  qualityButton.querySelector(".value").textContent = translate(QUALITY_NAMES[profile]);
-  function cycleQuality() {
-    const next = QUALITY_ORDER[(QUALITY_ORDER.indexOf(profile) + 1) % QUALITY_ORDER.length];
+  const qualityPanel = document.querySelector("#quality-panel");
+  qualityButton.querySelector(".value").textContent = translate(qualityLabel(profile));
+  const qualityView = quality.mount(qualityPanel.querySelector(".quality-slot"), { heading: false });
+  function placeQuality() {
+    const r = qualityButton.getBoundingClientRect();
+    qualityPanel.style.right = `${Math.max(8, innerWidth - r.left + 10)}px`;
+    qualityPanel.style.top = `${Math.max(8, Math.min(r.top - 6, innerHeight - qualityPanel.offsetHeight - 8))}px`;
+  }
+  function openQuality() {
+    if (logbook.open) toggleLogbook();
+    if (!userPaused && !waiting) setPaused(true);
+    qualityPanel.hidden = false;
+    qualityButton.setAttribute("aria-expanded", "true");
+    placeQuality();
+    qualityView.focus();
+  }
+  function closeQuality({ refocus = false } = {}) {
+    if (qualityPanel.hidden) return;
+    const inside = qualityPanel.contains(document.activeElement);
+    qualityPanel.hidden = true;
+    qualityButton.setAttribute("aria-expanded", "false");
+    if (inside && refocus && getComputedStyle(qualityButton).visibility === "visible") qualityButton.focus({ preventScroll: true });
+    else if (inside) document.activeElement.blur();
+  }
+  const toggleQuality = () => (qualityPanel.hidden ? openQuality() : closeQuality({ refocus: true }));
+  qualityButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleQuality();
+  });
+  qualityPanel.querySelector(".close").addEventListener("click", () => closeQuality({ refocus: true }));
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (!qualityPanel.hidden && !qualityPanel.contains(event.target) && !qualityButton.contains(event.target)) closeQuality();
+    },
+    true,
+  );
+  window.addEventListener("resize", () => qualityPanel.hidden || placeQuality());
+  // A step picked (on the card or in the panel): kept for next time, the fish saved (once
+  // the river is built and there is one), and the game loaded afresh at the new quality.
+  function setQuality(name) {
     try {
-      localStorage.setItem(QUALITY_KEY, next);
+      localStorage.setItem(QUALITY_KEY, name);
     } catch {}
-    hud.note(`Grafik: ${QUALITY_NAMES[next]} …`);
-    persist();
+    if (built) {
+      hud.note(`Grafik: ${qualityLabel(name)} …`);
+      persist();
+    }
     const url = new URL(location.href);
     url.searchParams.delete("quality");
     setTimeout(() => location.replace(url.toString()), 350);
   }
-  qualityButton.addEventListener("click", (event) => {
-    event.stopPropagation();
-    cycleQuality();
-    qualityButton.blur();
-  });
 
   const held = new Set();
   const look = { yaw: fish.yaw, pitch: 0 };
@@ -524,7 +568,11 @@ async function start() {
       return;
     }
     if (event.code === "KeyG" && !event.repeat) {
-      cycleQuality();
+      toggleQuality();
+      return;
+    }
+    if (event.code === "Escape" && !qualityPanel.hidden) {
+      closeQuality({ refocus: true });
       return;
     }
     if (event.code === "KeyF" && !event.repeat) {
@@ -564,6 +612,8 @@ async function start() {
   window.addEventListener("blur", () => held.clear());
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
   canvas.addEventListener("pointerdown", (event) => {
+    // (Before the swim the title card's button starts it, not a click on the river.)
+    if (waiting) return;
     sound.start();
     hud.touched();
     if (userPaused) setPaused(false);
@@ -2652,9 +2702,12 @@ async function start() {
     track("mode", { vegan: mode.vegan });
   };
   mark("ready");
+  built = true;
+  habitat.classList.remove("building");
   if (title) {
     intro.ready();
     intro.started.then(() => {
+      closeQuality();
       track("start", { stage: STAGES[fish.stage].id, lang, resumed: state && !query.has("new") ? "yes" : "no" });
       sound.start();
       look.yaw = fish.yaw;
