@@ -433,7 +433,11 @@ async function start() {
   // Into the game: full screen (unless F has turned it off) and the pointer captured, when
   // the swim starts and whenever it is taken up again with a click.
   let wantFullscreen = true;
+  // (When the game last asked for the pointer: a browser may drop it once on its way into
+  // full screen, which is not the player leaving the game.)
+  let capturedAt = -1e9;
   function capture() {
+    capturedAt = performance.now();
     if (wantFullscreen && !document.fullscreenElement && habitat.requestFullscreen)
       Promise.resolve(habitat.requestFullscreen({ navigationUI: "hide" }))
         // On a phone, held sideways from then on (where the browser lets a page ask).
@@ -636,9 +640,20 @@ async function start() {
   });
   document.addEventListener("pointerlockchange", () => {
     habitat.classList.toggle("locked", locked());
+    // Never caught while a card is up (the title card, the pause, the logbook): a request
+    // still under way when it came up is let go at once.
+    if (locked() && (userPaused || waiting || logbook.open)) {
+      releasing = true;
+      document.exitPointerLock?.();
+      return;
+    }
     // The pointer let go by the player (Esc) or taken by another window: pause. Not when
-    // the game let it go itself (the logbook).
-    if (!locked() && !releasing && !waiting && !logbook.open && dead <= 0) setPaused(true);
+    // the game let it go itself (the logbook), and not when the browser dropped it on the
+    // way into full screen right after the game took it: then it is taken again.
+    if (!locked() && !releasing && !waiting && !logbook.open && dead <= 0) {
+      if (performance.now() - capturedAt < 1500 && !userPaused) Promise.resolve(canvas.requestPointerLock?.()).catch(() => {});
+      else setPaused(true);
+    }
     releasing = false;
   });
   document.addEventListener("mousemove", (event) => {
