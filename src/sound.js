@@ -224,9 +224,10 @@ export function createSound() {
     f.connect(top);
     return [f, top];
   }
-  // A value the bed steers, written only when it has moved enough to be heard.
+  // A value the bed steers, written only when it has moved enough to be heard, easing
+  // there with time constant `tau` (s).
   const knob = (param, tolerance = 0.02, floor = 0.002) => ({ param, last: NaN, tolerance, floor });
-  function steer(k, value, tau, now) {
+  function steer(k, value, now, tau) {
     if (Math.abs(value - k.last) <= Math.max(k.floor, Math.abs(k.last) * k.tolerance)) return;
     k.last = value;
     k.param.setTargetAtTime(value, now, tau);
