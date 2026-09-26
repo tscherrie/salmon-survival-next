@@ -208,6 +208,11 @@ if (get("floe_knock")) check(`floe_knock ≥ +6 dB over the bed on a phone: ${ge
 // The river's small sounds: heard, but under the bed (400 ms loudness up by +0.3 to +4 dB).
 if (get("mill")?.extra) check(`mill: its paddles slap (${get("mill").extra.slaps} in 8 s, 5-9), under the bed (Δ400ms ${get("mill").d400} ≤ +3)`, get("mill").extra.slaps >= 5 && get("mill").extra.slaps <= 9 && get("mill").d400 <= 3);
 for (const name of ["bread", "counter"]) if (get(name)) check(`${name} heard but quiet (Δ400ms ${get(name).d400}, +0.3..+3)`, get(name).d400 >= 0.3 && get(name).d400 <= 3);
+if (get("ship")?.extra) {
+  const e = get("ship").extra;
+  check(`ship: its drone rises (+${e.rise} dB at 30-60 Hz) and is gone after (${e.after}), the screw throbs every ${e.throb} s (0.22-0.32)`, e.rise >= 3 && e.after <= 1.5 && e.throb >= 0.22 && e.throb <= 0.32);
+}
+if (get("grunts")?.extra) check(`grunts: a run of knocks (${get("grunts").extra.knocks}), in the ambience (Δ400ms ${get("grunts").d400} ≤ +4)`, get("grunts").extra.knocks >= 2 && get("grunts").d400 <= 4);
 for (const name of ["ice_chirp"]) if (get(name)) check(`${name} heard but in the ambience (Δ400ms ${get(name).d400}, +0.3..+4)`, get(name).d400 >= 0.3 && get(name).d400 <= 4);
 // The stages of a life: heard on a phone, each in a few nodes; a beaten hunter not the
 // stage fanfare; spawning goes silent under its veil and the new generation rings in.

@@ -221,6 +221,9 @@
     // fish counter.
     { name: "mill", kind: "shot", seconds: 12, params: (t) => ({ mill: t >= 4 ? 1 : 0 }), measure: (m) => ({ slaps: m.onsets(4, 12, 800, 2000, 4, 0.5) }) },
     shot("bread", (s) => s.plops?.(5)),
+    // At sea: a ship passing (16 s from 4 s on), fish grunting at night.
+    { name: "ship", kind: "shot", seconds: 24, params: { regions: only("sea"), sea: 1 }, events: [[4, (s) => s.debug?.ship?.(16)]], measure: (m) => ({ rise: m.band(10, 14, 30, 60) - m.band(2, 4, 30, 60), throb: m.period(9, 15, 300, 900, 0.2, 0.4, 0.02), after: m.band(21, 23.5, 30, 60) - m.band(2, 4, 30, 60) }) },
+    { ...shot("grunts", (s) => s.debug?.grunt?.(), { regions: only("sea"), sea: 1, daylight: 0 }), measure: (m) => ({ knocks: m.onsets(4, 5, 150, 300, 4, 0.03) }) },
     shot("counter", (s) => s.counter?.()),
     { ...shot("storm_swell", (s) => s.storm?.()), seconds: 12, measure: (m) => ({ d400: m.loudest(4, 11.5, 0.4) - m.loudest(2.5, 4, 0.4), early: m.spectrum(4.5, 6).centroid, late: m.spectrum(6.5, 7.9).centroid }) },
     shot("thunder_far", (s) => s.thunder(0.1)),

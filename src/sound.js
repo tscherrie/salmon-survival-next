@@ -104,6 +104,8 @@ const MIX = {
   creak: 0.25,
   plops: 0.6,
   counter: 0.6,
+  ship: 0.35,
+  grunt: 0.7,
   crack: 0.7,
 };
 // The leap's sweet spot (main.js: a leap released above this on the swing clears the fall).
@@ -141,6 +143,12 @@ export function createSound() {
     nextClatter = 0,
     nextChirp = 0,
     nextSlap = 0,
+    nextGrunt = 0,
+    // A ship's pass at sea: when it began, how long it takes, which way, when the next.
+    shipFrom = -1e9,
+    shipFor = 30,
+    shipWay = 1,
+    shipNext = 0,
     nextCreak = 0,
     nextSteer = 0,
     lastSwallow = 0,
@@ -322,6 +330,12 @@ export function createSound() {
     body.connect(world);
     const gillsGain = amp(0);
     loop(bank("gills")[0]).connect(gillsGain).connect(body);
+    // A ship passing far off at sea now and then (see update()): its drone, placed.
+    const shipGain = amp(0);
+    const shipPan = context.createStereoPanner ? panner(0) : null;
+    const shipSource = loop(bank("ship")[0], 0);
+    shipSource.connect(shipGain);
+    (shipPan ? shipGain.connect(shipPan) : shipGain).connect(ambience);
     // The scent of home, for a spawner on its way back (see update(): `home`).
     const homeGain = amp(0);
     loop(bank("home")[0], 0).connect(homeGain).connect(water);
@@ -422,12 +436,14 @@ export function createSound() {
         waterTone: knob(waterTone.frequency, 0.015, 1),
         gills: knob(gillsGain.gain),
         home: knob(homeGain.gain),
+        ship: knob(shipGain.gain),
+        shipPan: shipPan ? knob(shipPan.pan, 0.02, 0.01) : null,
         ambience: knob(ambience.gain),
       },
       // Moved only when the ear crosses the surface, at the pace of the crossing.
       crossing: { pingsUnder: pingsUnder.gain, waterDuck: waterDuck.gain, dry: dry.gain, wet: wet.gain, airOpen: airOpen.gain, surface: surface.gain, air: air.gain },
     };
-    for (const name of ["gravel", "clatter", "chirp", "bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear", "fanfare", "chime-bronze", "chime-silver", "chime-gold", "victory", "growth", "hatch", "crack", "slap", "creak", "plops", "counter"]) bank(name);
+    for (const name of ["gravel", "clatter", "chirp", "bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear", "fanfare", "chime-bronze", "chime-silver", "chime-gold", "victory", "growth", "hatch", "crack", "slap", "creak", "plops", "counter", "grunt"]) bank(name);
     bank("white");
     bank("brown");
     return true;
@@ -564,6 +580,11 @@ export function createSound() {
   // from above only its low murmur.
   const waterTone = () => Math.exp(Math.log(700) + (Math.log(clearTone) - Math.log(700)) * crossing);
 
+  function startShip(seconds) {
+    shipFrom = clock;
+    shipFor = seconds;
+    shipWay = Math.random() < 0.5 ? -1 : 1;
+  }
   function sayCall(kind, pan) {
     const c = CALLS[kind];
     if (!c) return;
@@ -584,6 +605,8 @@ export function createSound() {
     // For the sound check: what is rare, now.
     debug: {
       chirp: () => ready() && play(pick(bank("chirp")), nodes.ambience, MIX.chirp, undefined, 1, 0, true),
+      grunt: () => ready() && play(pick(bank("grunt")), nodes.ambience, MIX.grunt, undefined, 1, 0, true),
+      ship: (seconds = 30) => startShip(seconds),
     },
     get enabled() {
       return enabled;
@@ -1107,6 +1130,18 @@ export function createSound() {
           if (wanted()) play(pick(bank("creak")), nodes.surface, MIX.creak * mill * mill, now + random(0.1, 0.5), random(0.9, 1.1), 0, true);
         }
       }
+      // At sea: now and then a ship passing far off, and at night fish grunting.
+      if (seaW > 0.5) {
+        if (!shipNext) shipNext = clock + random(30, 90);
+        if (clock > shipNext) {
+          shipNext = clock + random(60, 150);
+          startShip(30);
+        }
+        if (clock > nextGrunt) {
+          nextGrunt = clock - Math.log(1 - Math.random()) * 12;
+          if (night > 0.5 && submerged > 0.5 && wanted()) play(pick(bank("grunt")), nodes.ambience, MIX.grunt * random(0.5, 1), now + 0.02, random(0.9, 1.1), 0, true);
+        }
+      }
       // Gravel ticking along the bed of a brook, the more the harder it runs and the nearer
       // the bed the fish is.
       if (clock > nextGravel) {
@@ -1168,6 +1203,11 @@ export function createSound() {
       steer(k.rainUnder, MIX.rainUnder * rain * open, now, 1.2);
       // (The pings brightest just under the surface, fainter deeper down.)
       steer(k.pings, MIX.pings * rain * open * (0.3 + 0.7 * (1 - depthRel)), now, 1.2);
+      // The ship: rising and falling over its pass, crossing from one side to the other.
+      const passed = (clock - shipFrom) / shipFor;
+      const ship = passed >= 0 && passed < 1 ? Math.pow(Math.sin(Math.PI * passed), 2) : 0;
+      steer(k.ship, MIX.ship * ship * seaW, now, 0.5);
+      if (k.shipPan && ship > 0) steer(k.shipPan, shipWay * (1.4 * passed - 0.7), now, 0.5);
       // The home brook's scent: its gurgle and a soft chord, swelling the nearer home.
       steer(k.home, MIX.home * Math.min(1, home), now, 1.5);
       // The gills working while winded, harder the less breath there is.
