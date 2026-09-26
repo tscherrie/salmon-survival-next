@@ -94,6 +94,33 @@ export function half(channels) {
   out.rate = RATE / 2;
   return out;
 }
+// A finished sound dulled: everything above `frequency` taken away, steeply (two two-pole
+// lowpasses, at unit gain), for what must be a thud and not a hiss.
+export function dull(data, frequency) {
+  const w = (2 * Math.PI * frequency) / RATE,
+    alpha = Math.sin(w) / (2 * 0.7071),
+    a0 = 1 + alpha;
+  const b0 = (1 - Math.cos(w)) / 2 / a0,
+    b1 = (1 - Math.cos(w)) / a0,
+    a1 = (-2 * Math.cos(w)) / a0,
+    a2 = (1 - alpha) / a0;
+  for (let pass = 0; pass < 2; pass++) {
+    let x1 = 0,
+      x2 = 0,
+      y1 = 0,
+      y2 = 0;
+    for (let i = 0; i < data.length; i++) {
+      const x = data[i];
+      const y = b0 * x + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2;
+      x2 = x1;
+      x1 = x;
+      y2 = y1;
+      y1 = y;
+      data[i] = y;
+    }
+  }
+  return data;
+}
 // The last `seconds` of a sound faded out, so that nothing stops on a click.
 export function fadeOut(data, seconds = 0.03) {
   const n = Math.min(data.length, Math.floor(seconds * RATE));

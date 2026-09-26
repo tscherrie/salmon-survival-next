@@ -3,7 +3,7 @@
 // (src/sound-make.js) and played by src/sound.js. Each is pitched and shaped so that a
 // phone's small speaker still plays it: whatever is low in them has a part in 250-900 Hz.
 
-import { RATE, biquad, fadeOut, half, hiss, mono, random, ring, tone, white } from "./sound-make.js";
+import { RATE, biquad, dull, fadeOut, half, hiss, mono, random, ring, tone, white } from "./sound-make.js";
 
 // ---- What the fish does.
 
@@ -13,7 +13,8 @@ export function makeWhump() {
   const d = mono(0.45);
   tone(d, 0, random(560, 640), random(190, 215), 0.03, 0.06, 0.8, 0.004);
   hiss(d, 0, "bandpass", random(320, 380), 0.9, 0.05, 0.55, 0.006);
-  return [fadeOut(d)];
+  // (Water pushed, not hissing: nothing above about 1.5 kHz.)
+  return [fadeOut(dull(d, 1500))];
 }
 // The jaws snapping shut: a hard tick high up (2.4 kHz), the knock of the bone under it
 // (420 Hz) and a spit of noise.
@@ -32,7 +33,7 @@ export function makeDenied(low = 1) {
   ring(d, 0, random(315, 345) * low, 0.025 / low, 0.8);
   hiss(d, 0, "bandpass", 480 * low, 0.75, 0.02 / low, 0.2);
   if (low < 1) ring(d, 0, 70, 0.12, 0.5);
-  return [fadeOut(d)];
+  return [fadeOut(dull(d, 1800 * low))];
 }
 // Out of breath: a gasp drawn in (700-1800 Hz, swelling, then cut off).
 export function makeGasp() {
