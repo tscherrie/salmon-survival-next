@@ -68,6 +68,12 @@ export const SHOTS = [
   { name: "kacheln", stage: "parr", at: 6000, season: "summer", hour: 13, view: { eye: [-10, 0, -5], target: [22, 0, -14] } },
   // The bank at the waterline from just above the water.
   { name: "ufer", stage: "parr", at: 2500, season: "summer", hour: 15, view: { eye: [-6, -10, 0.8], target: [8, -24, 0.3] } },
+  // The block cave: great slabs piled over a tunnel in the upper river, seen from upstream.
+  { name: "blockhoehle", stage: "parr", at: 3815, u: -2.5, season: "summer", hour: 13, view: { eye: [2, 0, -11], target: [22, 0, -12] } },
+  // Looking down onto the stones of the nursery pool: moss on their tops, tufts.
+  { name: "moosstein", stage: "fry", at: 240, season: "summer", hour: 13, view: { eye: [-4, 0, -1.5], target: [6, 0, -6] } },
+  // Near the bed of the middle river: worn boulders and cobbles in the grey river stone.
+  { name: "mittellauf", stage: "smolt", at: 11790, season: "spring", hour: 13, view: { eye: [-6, 0, -26], target: [10, 0, -29] } },
 ];
 
 const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));

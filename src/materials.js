@@ -1318,28 +1318,78 @@ export async function createRockMaterials() {
     load("pine_bark_diff", true),
     load("pine_bark_nor_gl", false),
   ]);
-  // cobbles: the small stones strewn over the gravel, one instanced mesh a block, each with
-  // its own brightness and share of moss in an attribute of its own (cobbleTone) -- not the
-  // instance colour, which the renderer would also lay over the stone's colour.
-  const make = (map, normalMap, { scale, grey, moss, cobbles = false }) => {
+  // Wood: the photograph from all three sides, the vertex colour's red its shade and green
+  // its share of moss, capped on the side facing the light.
+  const make = (map, normalMap, { scale, grey, moss }) => {
     // (The vertex colours are read by the colour node itself: not multiplied in again.)
     const material = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.85 });
     const rockNormal = property("vec3", "rockNormal");
     material.colorNode = Fn(() => {
       const P = positionWorld;
-      // (The normal as the geometry has it, each instance turned and squashed its own way.)
       const Nw = normalWorldGeometry;
       const rock = triplanar(map, normalMap, P, Nw, 1 / scale);
       const c = mix(vec3(dot(rock.color, vec3(0.3, 0.55, 0.15))), rock.color, 1 - grey);
       rockNormal.assign(normalize(mix(Nw, rock.normal, 0.8)));
       // Moss and algae on the side facing the light.
       const n = noise3(P.mul(1.3)).mul(0.6).add(noise3(P.mul(4.1)).mul(0.4));
-      const vColor = cobbles ? vertexColor().mul(vec4(attribute("cobbleTone", "vec3"), 1)) : vertexColor();
+      const vColor = vertexColor();
       const cap = smoothstep(0.1, 0.75, Nw.y.add(n.sub(0.5).mul(0.7))).mul(moss).mul(vColor.g);
       const growth = mix(vec3(0.05, 0.085, 0.025), vec3(0.14, 0.17, 0.06), noise3(P.mul(11)));
       return vec4(mix(c.mul(vColor.r), growth, cap.mul(0.9)), 1);
     })();
     material.normalNode = toViewNormal(rockNormal);
+    waterLit(material);
+    return material;
+  };
+  // Stone (render/rocks.js RockBatch): the photograph from all three sides; each vertex
+  // brings its shade and hollows (colour.r), where moss would take and how much grows there
+  // (colour.g, worked out as the stone lies), its height over its seat and over the water
+  // (rockData). So: moss in cushions on the tops, draped over the edges; a film of silt
+  // where the stone meets the bed; above the water a dark wet band, then dry, paler rock.
+  const stone = (map, normalMap, { scale, grey, moss }) => {
+    const material = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.8 });
+    const rockNormal = property("vec3", "rockNormal");
+    const rockRough = property("float", "rockRough");
+    material.colorNode = Fn(() => {
+      const P = positionWorld;
+      const Nw = normalWorldGeometry;
+      const rock = triplanar(map, normalMap, P, Nw, 1 / scale);
+      const lum = dot(rock.color, vec3(0.3, 0.55, 0.15));
+      const vColor = vertexColor();
+      const data = attribute("rockData", "vec2");
+      const c = mix(vec3(lum), rock.color, 1 - grey).mul(vColor.r).toVar();
+      const normal = normalize(mix(Nw, rock.normal, 0.8)).toVar();
+      // Wet stone under water: smooth where the water polishes it, rougher in the grain.
+      const rough = mix(0.62, 0.86, smoothstep(0.15, 0.55, lum)).toVar();
+      // Moss: cushions where the stone would carry it, patchy at their edges.
+      const patch = noise3(P.mul(2.1)).mul(0.6).add(noise3(P.mul(6.3).add(4)).mul(0.4));
+      const cap = smoothstep(0.15, 0.6, vColor.g.mul(patch.mul(0.9).add(0.45))).mul(moss).toVar();
+      // Silt where it meets the bed (under the water only).
+      const under = smoothstep(0.05, -0.05, data.y);
+      const silt = smoothstep(0.45, 0.02, data.x.add(noise3(P.mul(1.7)).sub(0.5).mul(0.35))).mul(under);
+      c.assign(mix(c, vec3(0.19, 0.17, 0.12).mul(lum.mul(0.8).add(0.6)), silt.mul(0.7)));
+      rough.assign(mix(rough, 0.95, silt));
+      cap.mulAssign(silt.mul(-0.8).add(1));
+      // Above the water: a dark, glossy band where the waves wet it, then dry pale rock
+      // (and the moss thins out).
+      const band = smoothstep(-0.02, 0.06, data.y).mul(smoothstep(0.55, 0.2, data.y));
+      const dry = smoothstep(0.3, 0.75, data.y);
+      c.assign(mix(c, c.mul(0.62), band));
+      c.assign(mix(c, mix(vec3(dot(c, vec3(0.3, 0.55, 0.15))), c, 0.7).mul(1.35), dry));
+      rough.assign(mix(mix(rough, 0.35, band), 0.9, dry));
+      cap.mulAssign(dry.mul(-0.6).add(1));
+      // The moss itself: dark green going to olive, following the stone's own grain below
+      // it (thin moss shows what it grows on), and softer than the rock.
+      const growth = mix(vec3(0.035, 0.065, 0.02), vec3(0.12, 0.15, 0.05), noise3(P.mul(9)).mul(0.7).add(noise3(P.mul(23)).mul(0.3))).mul(lum.mul(1.3).add(0.45));
+      c.assign(mix(c, growth, cap.mul(0.82)));
+      normal.assign(normalize(mix(normal, Nw, cap.mul(0.35))));
+      rough.assign(mix(rough, 0.95, cap));
+      rockNormal.assign(normal);
+      rockRough.assign(rough);
+      return vec4(c, 1);
+    })();
+    material.normalNode = toViewNormal(rockNormal);
+    material.roughnessNode = rockRough;
     waterLit(material);
     return material;
   };
@@ -1356,12 +1406,8 @@ export async function createRockMaterials() {
   const set = {
     // Drowned trunks and roots.
     wood: make(bark, barkNormal, { scale: 9, grey: 0.1, moss: 0.5 }),
-    cobbles: {},
   };
-  for (const [kind, [map, normalMap, options]] of Object.entries(kinds)) {
-    set[kind] = make(map, normalMap, options);
-    set.cobbles[kind] = make(map, normalMap, { ...options, cobbles: true });
-  }
+  for (const [kind, [map, normalMap, options]] of Object.entries(kinds)) set[kind] = stone(map, normalMap, options);
   return set;
 }
 

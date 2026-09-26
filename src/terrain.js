@@ -1,9 +1,8 @@
 import * as THREE from "three";
-import { rockGeometry } from "./render/geometry.js";
+import { RockBatch, chooseRock, rockSet, rockWeights, topAt } from "./render/rocks.js";
 import { GeometryBatch, randomGenerator } from "./render/geometry.js";
 import { PLANT_FADE, foliageMaterial, plantShare } from "./render/foliage.js";
 import { FALLS, MILLS, S, TRIBUTARIES, bedDetail, current, frame, level, locate, passSlot, place, section, smooth, tributaryAt } from "./course.js";
-import { SolidBatch } from "./flora.js";
 import { TreeBatch, birch, fallenTrunk, fern, forestMaterial, juniper, pine, shrub, spruce, stump } from "./forest.js";
 import * as flora from "./flora.js";
 import { inClearing } from "./clearings.js";
@@ -118,12 +117,8 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
   // The forest (forest.js): needles and leaves cut out of cards, swaying, with the seasons.
   const treeMaterial = forestMaterial();
 
-  // Shared stone shapes.
-  const shapes = {
-    large: Array.from({ length: 6 }, (_, i) => withMossChannel(rockGeometry(i * 3.17 + 0.4, detail ? 44 : 30, 1))),
-    small: Array.from({ length: 5 }, (_, i) => withMossChannel(rockGeometry(i * 5.3 + 11.1, 18, 0.8))),
-  };
-  const cobble = withMossChannel(rockGeometry(37, 12, 1));
+  // The stones' shapes (render/rocks.js): one catalog for the whole river.
+  const shapes = rockSet();
 
   const blocks = new Map();
   const queue = [];
@@ -429,7 +424,7 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
     };
 
     // Boulders.
-    const stones = { brook: new SolidBatch(), river: new SolidBatch(), sea: new SolidBatch() };
+    const stones = { brook: new RockBatch(), river: new RockBatch(), sea: new RockBatch() };
     const kind = r.sea + r.estuary * 0.5 > 0.5 ? "sea" : r.brook + r.upper > 0.5 ? "brook" : "river";
     const moss = r.brook * 1 + r.upper * 0.7 + r.middle * 0.35 + r.lower * 0.2 + (r.sea + r.estuary) * 0.3;
     const density = r.brook * 9 + r.upper * 5 + r.middle * 1.4 + r.lower * 0.3 + r.estuary * 0.15 + r.sea * 0.8;
@@ -453,21 +448,25 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
       const rx = size * range(0.8, 1.3),
         ry = size * range(0.5, 0.85),
         rz = size * range(0.8, 1.2);
-      const shape = size > 2.5 ? shapes.large[Math.floor(random() * shapes.large.length)] : shapes.small[Math.floor(random() * shapes.small.length)];
+      // Which stone: the one draw it always had, now weighed by the place (angular where the
+      // water is rough, as the bed's broken stone is; worn round in the big river) and by
+      // how flat the stone was drawn.
+      const angular = Math.min(1, channel.rapid * 1.2 + channel.region.brook * 0.35 + Math.max(0, channel.riffle) * 0.3);
+      const shape = chooseRock(size > 2.5 ? shapes.large : shapes.small, random(), rockWeights(channel.region, { rocky, angular, flat: ry / Math.max(rx, rz) }));
       euler.set(range(-0.2, 0.2), range(0, TAU), range(-0.2, 0.2));
       quaternion.setFromEuler(euler);
       const rest = seat(p, Math.max(rx, rz) * 0.7);
       const cy = rest.y + ry * range(0.1, 0.4);
       matrix.compose(new THREE.Vector3(p.x, cy, p.z), quaternion, new THREE.Vector3(rx, ry, rz));
       const bright = range(0.75, 1.1);
-      stones[kind].add(shape, matrix, new THREE.Color(bright, moss * range(0.6, 1.1), 0), (q, nrm, i) => shape.attributes.color.getX(i));
+      stones[kind].add(shape, matrix, { bright, moss: moss * range(0.6, 1.1), seat: rest.y, water: p.level });
       // The collider is the stone's own ellipsoid, turned as the stone is turned, a shade
       // larger than its middle so the knobbly surface is inside it.
       colliders.push({ x: p.x, y: cy, z: p.z, r: Math.max(rx, rz) * 1.05, rx: rx * 1.05, rz: rz * 1.05, ry: ry * 1.05, cos: Math.cos(euler.y), sin: Math.sin(euler.y), s: p.s, u: p.u });
       // Moss and algae on the stones: nearly every one in the brook, more of them the
       // further up the river.
       const overgrown = kind === "brook" ? 0.92 : kind === "river" ? 0.2 + 0.7 * moss : 0;
-      if (p.depth > 0.6 && random() < overgrown) tops.push({ x: p.x, y: cy + ry * 0.85, z: p.z, cy, r: Math.min(rx, rz), ry, s: p.s, level: p.level });
+      if (p.depth > 0.6 && random() < overgrown) tops.push({ x: p.x, y: cy + ry * 0.85, z: p.z, cy, r: Math.min(rx, rz), ry, s: p.s, level: p.level, shape, matrix: matrix.clone() });
       if (k % 3 === 2) yield "boulders";
     }
     for (const [name, b] of Object.entries(stones)) {
@@ -480,24 +479,13 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
     }
     yield "boulders";
 
-    // Cobbles scattered over gravel.
+    // Cobbles scattered over gravel: four shapes, which one from where it lies (no draw),
+    // merged into one mesh a block.
     {
       const want = Math.floor((area / 1000) * (r.brook * 70 + r.upper * 45 + r.middle * 18 + r.lower * 3 + r.sea * 4 + r.estuary * 2));
       if (want > 0) {
-        // (Each cobble's brightness and share of moss in an attribute of its own, on a
-        // geometry sharing the cobble's shape: rocks.cobbles.)
-        const tone = new THREE.InstancedBufferAttribute(new Float32Array(want * 3), 3);
-        const geometry = new THREE.BufferGeometry();
-        for (const [name, attribute] of Object.entries(cobble.attributes)) geometry.setAttribute(name, attribute);
-        geometry.setIndex(cobble.index);
-        geometry.setAttribute("cobbleTone", tone);
-        // (Not disposed with the block: that would free the shape's buffers the other
-        // blocks still draw from.)
-        geometry.userData.sharesCobble = true;
-        const mesh = new THREE.InstancedMesh(geometry, rocks.cobbles[kind], want);
+        const cobbles = new RockBatch();
         const object = new THREE.Object3D();
-        const color = new THREE.Color();
-        let used = 0;
         for (let k = 0; k < want; k++) {
           const p = pick();
           if (p.depth < -0.5 || p.ground.gravel + p.ground.rock < 0.25 || inPassSlot(p.s, p.u)) continue;
@@ -511,18 +499,20 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
           object.updateMatrix();
           const { x: sx, y: sy, z: sz } = object.scale;
           colliders.push({ x: p.x, y: object.position.y, z: p.z, r: Math.max(sx, sz) * 1.05, rx: sx * 1.05, rz: sz * 1.05, ry: sy * 1.05, cos: Math.cos(object.rotation.y), sin: Math.sin(object.rotation.y), s: p.s, u: p.u });
-          mesh.setMatrixAt(used, object.matrix);
+          const hashed = Math.sin(p.x * 12.9898 + p.z * 78.233) * 43758.5453;
+          const shape = shapes.cobble[Math.floor((hashed - Math.floor(hashed)) * shapes.cobble.length)];
           // The bigger cobbles in the brook and upper river carry a tuft of moss.
-          if (size > 0.45 && p.depth > 0.4 && random() < moss * 0.45) tops.push({ x: p.x, y: object.position.y + sy * 0.8, z: p.z, cy: object.position.y, r: Math.min(sx, sz), ry: sy, s: p.s, level: p.level, small: true });
-          color.setRGB(range(0.65, 1.15), moss * range(0.3, 1), 1);
-          tone.setXYZ(used, color.r, color.g, color.b);
-          used++;
+          if (size > 0.45 && p.depth > 0.4 && random() < moss * 0.45) tops.push({ x: p.x, y: object.position.y + sy * 0.8, z: p.z, cy: object.position.y, r: Math.min(sx, sz), ry: sy, s: p.s, level: p.level, small: true, shape, matrix: object.matrix.clone() });
+          const bright = range(0.65, 1.15);
+          cobbles.add(shape, object.matrix, { bright, moss: moss * range(0.3, 1), seat: rest.y, water: p.level });
         }
-        mesh.count = used;
-        mesh.receiveShadow = true;
-        mesh.castShadow = true;
-        mesh.name = "Cobbles";
-        if (used) group.add(mesh);
+        if (!cobbles.empty) {
+          const mesh = new THREE.Mesh(cobbles.geometry(), rocks[kind]);
+          mesh.receiveShadow = true;
+          mesh.castShadow = true;
+          mesh.name = "Cobbles";
+          group.add(mesh);
+        }
       }
     }
     yield "cobbles";
@@ -577,6 +567,9 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
         const out = top.r * (0.25 + 0.6 * Math.sqrt(1 - h * h));
         const q = new THREE.Vector3(top.x + Math.cos(a) * out, top.cy + top.ry * 0.85 * h, top.z + Math.sin(a) * out);
         if (q.y > top.level - 0.25) continue;
+        // (Whether it grows is still decided on the old round stone, so the draws stay as
+        // they were; where it grows is on the stone as it is.)
+        onStone(top, q);
         if (riffle && random() < 0.45) algae(plants, q, flow, random, 0.7 + top.r * 0.25);
         else mossTuft(plants, q, flow, random, 0.8 + top.r * 0.35);
       }
@@ -969,7 +962,8 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
       });
     }
   }
-  const isShared = (geometry) => geometry === cobble || geometry.userData.sharesCobble || shapes.large.includes(geometry) || shapes.small.includes(geometry);
+  // (Every stone is merged into its block's own geometry now: nothing a block holds is shared.)
+  const isShared = () => false;
 
   // The cell size a block should be built at, from its distance to the viewer.
   function cellFor(distance, size, near) {
@@ -1136,10 +1130,23 @@ export function mergeTubes(list) {
 
 // Stone shapes carry their shade in a colour attribute; the rock material reads red as
 // brightness and green as the share of moss, so both are kept in the shape's own colour.
-export function withMossChannel(geometry) {
-  const color = geometry.attributes.color;
-  for (let i = 0; i < color.count; i++) color.setXYZ(i, color.getX(i), 1, 0);
-  return geometry;
+// A tuft's point moved onto its stone's real top: turned into the stone's own frame, onto the
+// nearest part of its plan the stone covers, set on its surface there (a little into it),
+// and kept under the water.
+const toStone = new THREE.Matrix4();
+function onStone(top, q) {
+  if (!top.shape) return q;
+  toStone.copy(top.matrix).invert();
+  q.applyMatrix4(toStone);
+  const hit = topAt(top.shape, q.x, q.z);
+  if (hit) {
+    const cell = 1 / 12;
+    if (Math.abs(q.x - hit.x) > cell || Math.abs(q.z - hit.z) > cell) q.set(hit.x, 0, hit.z);
+    q.y = hit.y - 0.04;
+  }
+  q.applyMatrix4(top.matrix);
+  q.y = Math.min(q.y, top.level - 0.25);
+  return q;
 }
 
 // A drowned trunk or a twig: a tapering tube along a curve, its bark roughened, cheap

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { rockGeometry } from "./render/geometry.js";
+import { RockBatch, chooseRock, rockGeometry, rockSet, rockWeights } from "./render/rocks.js";
 import { GeometryBatch, randomGenerator } from "./render/geometry.js";
 import { foliageMaterial } from "./render/foliage.js";
 import { surfaceLevelAt, waterLit } from "./render/water.js";
@@ -36,7 +36,7 @@ import { relaid, COLD_SPRINGS, CRACKS, FALLS, ISLANDS, KING_POOL, MILLS, S, TRIB
 import { MODEL_LENGTH, createFishMesh } from "./anatomy.js";
 import { SolidBatch, bankGrass, fallenLeaf, hangingMoss, leafSpray, mossTuft, reeds, sedge, turfTuft } from "./flora.js";
 import { TreeBatch, alder, birch, fallenTrunk, fern, forestMaterial, roots, shrub, willow } from "./forest.js";
-import { trunkColliders, trunkGeometry, withMossChannel } from "./terrain.js";
+import { trunkColliders, trunkGeometry } from "./terrain.js";
 import { addPlace } from "./places.js";
 import { PointCloud, perPoint, photo, pointCloud } from "./materials.js";
 import { addClearing } from "./clearings.js";
@@ -50,7 +50,7 @@ import { nettingMaterial } from "./netting.js";
 // asks them: terrain.extras).
 //
 // A feature is { id, s, reach, build(ctx) } -- build a generator that fills ctx.group,
-// ctx.plants (a GeometryBatch of foliage), ctx.trees (a TreeBatch, forest.js), ctx.stones (a SolidBatch
+// ctx.plants (a GeometryBatch of foliage), ctx.trees (a TreeBatch, forest.js), ctx.stones (a RockBatch
 // of rock), ctx.wood (trunk geometries) and ctx.colliders / ctx.cover, yielding now and then
 // so a frame never stalls.
 
@@ -1853,7 +1853,9 @@ export function createFeatures(scene, { rocks, locate, surfaceMaterial = null })
   scene0 = scene;
   const leaves = foliageMaterial();
   const treeMaterial = forestMaterial();
-  const shapes = Array.from({ length: 5 }, (_, i) => withMossChannel(rockGeometry(i * 4.1 + 2.3, 30, 1)));
+  // The river's stones (render/rocks.js), and its lumps of earth as geometries of their own.
+  const shapes = rockSet();
+  const lumps = shapes.lump.map(rockGeometry);
   // Earth and turf, for the overhanging banks; stone and timber for what people built;
   // planks for the wreck. Each laid over with a photograph from all three sides (dressed
   // stone, weathered grain, forest earth), lit like everything else under water, and
@@ -1881,7 +1883,7 @@ export function createFeatures(scene, { rocks, locate, surfaceMaterial = null })
       surface: surfaceMaterial,
       plants: new GeometryBatch(),
       trees: new TreeBatch(),
-      stones: new SolidBatch(),
+      stones: new RockBatch(),
       wood: [],
       colliders: [],
       cover: [],
@@ -1901,14 +1903,18 @@ export function createFeatures(scene, { rocks, locate, surfaceMaterial = null })
       // A lump of earth (for overhanging banks), coloured as given.
       lump(x, y, z, rx, ry, rz, yaw, color) {
         const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(range(-0.1, 0.1), yaw, range(-0.1, 0.1))), new THREE.Vector3(rx, ry, rz));
-        ctx.earthBatch.add(shapes[Math.floor(random() * shapes.length)], m, color, (p, n) => 0.75 + 0.35 * Math.max(0, n.y));
+        ctx.earthBatch.add(lumps[Math.floor(random() * lumps.length)], m, color, (p, n) => 0.75 + 0.35 * Math.max(0, n.y));
       },
       // A rock at a world point, its radii and its turn about the vertical.
       rock(x, y, z, rx, ry, rz, yaw) {
         const euler = new THREE.Euler(range(-0.12, 0.12), yaw, range(-0.12, 0.12));
         const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(euler), new THREE.Vector3(rx, ry, rz));
-        const shape = shapes[Math.floor(random() * shapes.length)];
-        ctx.stones.add(shape, m, new THREE.Color(range(0.7, 1), range(0.6, 1), 0), (q, n, i) => shape.attributes.color.getX(i));
+        // (Blocks: the callers give the proportions, and pillars and lintels are made to
+        // touch, which a slab or a wedge would not fill, and a worn boulder would round off.)
+        const shape = chooseRock(shapes.large, random(), { block: 1 });
+        const water = level(locate(x, z, feature.s).s);
+        const bright = range(0.7, 1);
+        ctx.stones.add(shape, m, { bright, moss: range(0.6, 1), seat: y - ry, water });
         ctx.colliders.push({ x, y, z, r: Math.max(rx, rz) * 1.05, rx: rx * 1.05, rz: rz * 1.05, ry: ry * 1.05, cos: Math.cos(yaw), sin: Math.sin(yaw) });
       },
       // A stone at (s, u): radius r across, ry high; set on the bed, or at y if given.
@@ -1918,8 +1924,9 @@ export function createFeatures(scene, { rocks, locate, surfaceMaterial = null })
         const cy = y ?? floor + ry * 0.35;
         const euler = new THREE.Euler(range(-0.2, 0.2), range(0, TAU), range(-0.2, 0.2));
         const m = new THREE.Matrix4().compose(new THREE.Vector3(at.x, cy, at.z), new THREE.Quaternion().setFromEuler(euler), new THREE.Vector3(r, ry, r * range(0.8, 1.2)));
-        const shape = shapes[Math.floor(random() * shapes.length)];
-        ctx.stones.add(shape, m, new THREE.Color(range(0.75, 1.05), range(0.5, 1), 0), (q, n, i) => shape.attributes.color.getX(i));
+        const shape = chooseRock(r > 1.2 ? shapes.large : shapes.small, random(), rockWeights(section(Math.min(s, S.coast)).region, { flat: ry / r }));
+        const bright = range(0.75, 1.05);
+        ctx.stones.add(shape, m, { bright, moss: range(0.5, 1), seat: floor, water: level(s) });
         ctx.colliders.push({ x: at.x, y: cy, z: at.z, r: r * 1.05, rx: r * 1.05, rz: r * 1.05, ry: ry * 1.05, cos: Math.cos(euler.y), sin: Math.sin(euler.y) });
       },
     };

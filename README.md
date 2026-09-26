@@ -46,7 +46,7 @@ Useful for trying things: `?new&stage=parr&at=4500` starts a new parr at a place
 - `src/render/` – how it is drawn, in three.js's node shading language (TSL), on WebGPU where the browser has it and WebGL 2 where not: the water's light (`water.js`: caustic net, canopy shade, absorption, for every lit material), the caustic pass, the underwater fog, the soft shadows, the plants' material, the fish's swimming, instancing for shapes that bend before they are placed, and the passes after the scene (`post.js`: light shafts, the mirror under the surface, bloom, the temporal resolve, the grade)
 - `src/materials.js` – the bed, the rocks, the water's surface from below and above, the falls, the sky, point clouds
 - `shared/`, `ui/` – small helpers from Desktop Habitats, which the rendering first grew out of; `vendor/` – three.js r186 (`three.webgpu.js`, `three.tsl.js`, and the add-ons used, in `vendor/jsm/`)
-- `src/dev/shots.js`, `tools/` – photo points: the same scenes pictured and timed for every graphics change (`node tools/shots.mjs <set>`, then `tools/compare.html`)
+- `src/dev/shots.js`, `tools/` – photo points: the same scenes pictured and timed for every graphics change (`node tools/shots.mjs <set>`, then `tools/compare.html`); `node tools/layout-fingerprint.mjs` checks that a change left the river's layout as it was
 
 ## Credits and license
 
