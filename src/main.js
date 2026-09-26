@@ -50,6 +50,7 @@ import { createRedd } from "./redd.js";
 import { mode } from "./vegan.js";
 import { TRAITS, STEP, earned, heritage, inherit, loadHeritage, resetHeritage, traits as heritageTraits } from "./heritage.js";
 import { dither } from "./render/dither.js";
+import { mods } from "./mods.js";
 
 // English over the German, unless the player chose German.
 startTranslation();
@@ -633,10 +634,10 @@ async function start() {
       capture();
       return;
     }
-    if (event.button === 0 && !startCharge()) lungeQueued = true;
+    if (event.button === 0 && !mods.some((mod) => mod.takesButton?.(0)) && !startCharge()) lungeQueued = true;
   });
   canvas.addEventListener("pointerup", (event) => {
-    if (event.button === 0) releaseCharge();
+    if (event.button === 0 && !mods.some((mod) => mod.takesButton?.(0))) releaseCharge();
   });
   document.addEventListener("pointerlockchange", () => {
     habitat.classList.toggle("locked", locked());
@@ -1847,6 +1848,7 @@ async function start() {
     stepScent(dt);
     stepRedd(dt);
     const outcome = life.update(dt, { fish, salmon, camera, time, world, above: camera.position.y > level(cameraRiver.s), drive: drive.on ? drive.lead : null, ball: baitball.on ? baitball.ball : null });
+    for (const mod of mods) mod.step?.(dt, outcome);
     warnings(dt);
     goalArrow();
     stepJourney(dt, threatList.some((th) => th.level >= 0.6));
@@ -2654,6 +2656,12 @@ async function start() {
     frames++;
   }
 
+  // Extensions (src/mods.js) get the game's parts once, before the first frame, so that
+  // what they add to the scene is compiled with everything else.
+  const game = { scene, camera, renderer, canvas, habitat, query, settings, touchMode, salmon, fish, life, terrain, pebbles, features, falls, ripples, siblings, nets, hud, sound, badges, logbook, minimap, lifecard, save, brood, post, daylight, events, redd, drive, baitball, scent, world, stones, look, input, held, celebration, mirror, die, persist, respawn,
+    now: { get dead() { return dead; }, get time() { return time; }, get paused() { return userPaused || waiting || logbook.open; }, get locked() { return locked(); } } };
+  for (const mod of mods) mod.init?.(game);
+
   // ------------------------------------------------------------------------------------
   // First frame: build what is round the fish, then run.
   mark("built");
@@ -2781,7 +2789,7 @@ async function start() {
   }
   // One frame: the world (slowed during a celebration), its sparkle, the picture.
   function advance(dt) {
-    const still = userPaused || waiting || logbook.open;
+    const still = waiting || ((userPaused || logbook.open) && !mods.some((mod) => mod.keepRunning?.()));
     if (!still) {
       celebration.scale = celebrationScale();
       step(dt * celebration.scale);
@@ -2791,6 +2799,7 @@ async function start() {
       features.update(fish.river.s, 4);
       terrain.update({ x: camera.position.x, z: camera.position.z, s: cameraRiver.s, u: cameraRiver.u }, { radius: builtRadius(), near: clamp(0.28 + fish.length * 0.1, 0.35, 1), budget: 4, land: 60 });
     }
+    for (const mod of mods) mod.frame?.(dt);
     draw(still ? 0 : dt);
   }
   requestAnimationFrame(tick);

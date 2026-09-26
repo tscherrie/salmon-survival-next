@@ -734,6 +734,12 @@ export function createSound() {
     get stats() {
       return { state: context?.state ?? "none", time: context?.currentTime ?? 0, live, asleep, level, hushes: [...hushes], sleepIn: (sleepAt - performance.now()) / 1000 };
     },
+    // For extensions (src/mods.js): the context and the groups to play into, while the
+    // sound is on and running, else null. What plays into a group goes through the master,
+    // so mute, pause and the ear crossing the surface apply to it as to everything else.
+    buses() {
+      return ready() ? { context, water: nodes.water, surface: nodes.surface, air: nodes.air, ui: nodes.ui } : null;
+    },
     start() {
       if (!enabled) return;
       if (!context && !build()) return;
