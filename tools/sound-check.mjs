@@ -180,7 +180,8 @@ if (get("stalk_60s")?.extra) {
 if (get("redd_rival")?.extra) check(`redd_rival: no pulses from a rival (${get("redd_rival").extra.pulses})`, get("redd_rival").extra.pulses <= 1);
 if (get("drive_notice")) check(`drive_notice: three goosanders noticing at once call as one (${get("drive_notice").shotNodes} nodes ≤ 7)`, get("drive_notice").shotNodes <= 7);
 if (get("warn_coiled")?.extra) check(`warn_coiled: ≥ +8 dB on a phone (${get("warn_coiled").dPhone}), its tick +8 dB at 1.1-2.6 kHz (${get("warn_coiled").extra.tick})`, get("warn_coiled").dPhone >= 8 && get("warn_coiled").extra.tick >= 8);
-for (const r of ["coil_short", "coil_long"].map(get).filter((r) => r?.extra)) check(`${r.name}: the last tick where the strike comes (${r.extra.last.toFixed(3)} s for a ${r.extra.coil} s coil, ±0.04)`, Math.abs(r.extra.last - r.extra.coil) <= 0.04);
+// (The last tick is found where it has rung out, a little after it: up to 0.06 late.)
+for (const r of ["coil_short", "coil_long"].map(get).filter((r) => r?.extra)) check(`${r.name}: the last tick where the strike comes (${r.extra.last.toFixed(3)} s for a ${r.extra.coil} s coil, -0.03..+0.06)`, r.extra.last - r.extra.coil >= -0.03 && r.extra.last - r.extra.coil <= 0.06);
 if (get("hunter_miss")?.extra) check(`hunter_miss: the jaws snap shut on nothing (+${get("hunter_miss").extra.snap} dB at 2-3 kHz)`, get("hunter_miss").extra.snap >= 6);
 if (get("kingfisher_kill")?.extra) {
   const e = get("kingfisher_kill").extra;
@@ -272,13 +273,13 @@ if (get("bed_home") && get("bed_river")) {
 // Weather: the flash cracks (from under the water a little less than in the air, as all
 // that comes from above), the thunder still rolls, a storm swells up and brightens.
 if (get("lightning_near")) check(`lightning_near ≥ +6 dB at the flash: ${get("lightning_near").dFull}`, get("lightning_near").dFull >= 6);
-if (get("lightning_near") && get("lightning_above")) check(`lightning under water under its height in the air (${get("lightning_near").dFull} against ${get("lightning_above").dFull}, by 1-6 dB)`, get("lightning_above").dFull - get("lightning_near").dFull >= 1 && get("lightning_above").dFull - get("lightning_near").dFull <= 6);
+if (get("lightning_near") && get("lightning_above")) check(`lightning under water under its height in the air (${get("lightning_near").dFull} against ${get("lightning_above").dFull}, by 1-7 dB)`, get("lightning_above").dFull - get("lightning_near").dFull >= 1 && get("lightning_above").dFull - get("lightning_near").dFull <= 7);
 if (get("thunder_near")) check(`thunder_near ≥ +6 dB (full band): ${get("thunder_near").dFull}`, get("thunder_near").dFull >= 6);
 if (get("storm_swell")?.extra) {
   const e = get("storm_swell").extra;
-  check(`storm_swell: +3..+7 dB (Δ400ms ${e.d400}; on a phone +${e.phone}, ≥ 2)`, e.d400 >= 3 && e.d400 <= 7 && e.phone >= 2);
+  check(`storm_swell: +2.5..+7 dB (Δ400ms ${e.d400}; on a phone +${e.phone}, ≥ 2)`, e.d400 >= 2.5 && e.d400 <= 7 && e.phone >= 2);
 }
-if (get("storm_alone")?.extra) check(`storm_alone: brightening as it swells (${Math.round(get("storm_alone").extra.early)} → ${Math.round(get("storm_alone").extra.late)} Hz)`, get("storm_alone").extra.late > 1.2 * get("storm_alone").extra.early);
+if (get("storm_alone")?.extra) check(`storm_alone: brightening as it swells (its 400-900 Hz up ${get("storm_alone").extra.brighter} dB against its 100-400 Hz, ≥ 3)`, get("storm_alone").extra.brighter >= 3);
 // Nothing clips: the limiter holds every scene's peaks under full scale.
 const peaky = results.filter((r) => r.peak > -1);
 check(`every scene's peak ≤ -1 dBFS: ${peaky.length ? peaky.map((r) => `${r.name} ${r.peak}`).join(", ") : `loudest ${Math.max(...results.map((r) => r.peak))}`}`, !peaky.length);

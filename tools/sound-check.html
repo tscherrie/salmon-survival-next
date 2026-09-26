@@ -251,8 +251,9 @@
     { ...shot("grunts_ref", () => {}, { regions: only("sea"), sea: 1, daylight: 0 }), measure: (m) => ({ peak: m.loudest(4, 5, 0.4) }) },
     shot("counter", (s) => s.counter?.()),
     { ...shot("storm_swell", (s) => s.storm?.()), seconds: 12, measure: (m) => ({ d400: m.loudest(4, 11.5, 0.4) - m.loudest(2.5, 4, 0.4), phone: m.loudestPhone(4, 11.5, 0.4) - m.loudestPhone(2.5, 4, 0.4) }) },
-    // The same with the beds stopped: brightening as it swells (before its thunder at 8 s).
-    { ...shot("storm_alone", (s) => s.storm?.()), alone: true, measure: (m) => ({ early: m.spectrum(5, 6.5).centroid, late: m.spectrum(6.5, 8).centroid }) },
+    // The same with the beds stopped: brightening as it swells (before its thunder at 8 s) --
+    // its 400-900 Hz against its 100-400 Hz (a bubble now and then moves a centroid more).
+    { ...shot("storm_alone", (s) => s.storm?.()), alone: true, measure: (m) => ({ brighter: m.band(6.5, 8, 400, 900) - m.band(6.5, 8, 100, 400) - (m.band(5, 6.5, 400, 900) - m.band(5, 6.5, 100, 400)) }) },
     shot("thunder_far", (s) => s.thunder(0.1)),
     shot("eaten_fish", (s) => s.eaten("fish")),
     shot("eaten_bird", (s) => s.eaten("bird")),
