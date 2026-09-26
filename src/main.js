@@ -1770,7 +1770,11 @@ async function start() {
       if (brood.update(fish.stage, fish.progress, STAGES)) showBrood();
       if (time > 40) hud.tip("brood", broodWord("firstTip", { size: formatNumber(brood.size) }), 13);
     }
-    else readInput(dt);
+    else {
+      readInput(dt);
+      // Dead, the fish is not stepped: what it did last must not be told again each step.
+      fish.events.length = 0;
+    }
     lastPlace.copy(fish.position);
     // The gill nets in the estuary (in vegan mode they catch nothing).
     if (dead <= 0 && !fish.safe) {
@@ -2754,13 +2758,19 @@ async function start() {
     });
   } else begin();
 
-  let running = true;
+  // One chain of frames only: the frame asked for before the page was hidden still comes
+  // when it shows again, so it is called off before a new one is asked for.
+  let running = true,
+    frameId = 0;
   document.addEventListener("visibilitychange", () => {
     running = !document.hidden;
     sound.hush(!running, "hidden");
     last = performance.now();
     if (!running) persist();
-    if (running) requestAnimationFrame(tick);
+    if (running) {
+      cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(tick);
+    }
   });
   window.addEventListener("pagehide", persist);
   // A newer version out while the game sat in the background (an app on a phone's home
@@ -2785,7 +2795,7 @@ async function start() {
     if (fpsBox && frames % 15 === 0) fpsBox.textContent = `${Math.round(1 / frameRate.average)} fps · ${post.main.width}×${post.main.height} → ${renderer.domElement.width}×${renderer.domElement.height}`;
     last = now;
     advance(dt);
-    requestAnimationFrame(tick);
+    frameId = requestAnimationFrame(tick);
   }
   // One frame: the world (slowed during a celebration), its sparkle, the picture.
   function advance(dt) {
@@ -2802,7 +2812,7 @@ async function start() {
     for (const mod of mods) mod.frame?.(dt);
     draw(still ? 0 : dt);
   }
-  requestAnimationFrame(tick);
+  frameId = requestAnimationFrame(tick);
 
   // Development handles: ?capture=1 with tools/capture-server.mjs running (and ?shots, the
   // photo points of src/dev/shots.js).
@@ -2880,7 +2890,8 @@ async function start() {
         running = !value;
         if (running) {
           last = performance.now();
-          requestAnimationFrame(tick);
+          cancelAnimationFrame(frameId);
+          frameId = requestAnimationFrame(tick);
         }
       },
       async run(seconds, script = null, dt = 1 / 30) {
