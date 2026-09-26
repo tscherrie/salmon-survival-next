@@ -74,6 +74,14 @@ export const SHOTS = [
   { name: "moosstein", stage: "fry", at: 240, season: "summer", hour: 13, view: { eye: [-4, 0, -1.5], target: [6, 0, -6] } },
   // Near the bed of the middle river: worn boulders and cobbles in the grey river stone.
   { name: "mittellauf", stage: "smolt", at: 11790, season: "spring", hour: 13, view: { eye: [-6, 0, -26], target: [10, 0, -29] } },
+  // Drift wood jammed in the upper river, from under the water: trunks, broken ends, stubs.
+  { name: "totholz", stage: "parr", at: 4600, season: "summer", hour: 13, view: { eye: [2, 2, -2], target: [16, 14, -3] } },
+  // The head of the Erleninsel from just above the water: a stump, a fallen trunk, drift wood.
+  { name: "stubben", stage: "parr", at: 2500, season: "summer", hour: 13, view: { eye: [28, -12, 1], target: [45, -3, 1.2] } },
+  // Under the Wurzelufer: roots hanging from the undercut bank into the water, twigs on the bed.
+  { name: "wurzelufer", stage: "parr", at: 560, season: "summer", hour: 13, view: { eye: [0, 11, -0.7], target: [5, 18, -1] } },
+  // The beavers' lodge on the Erlenbach: sticks on a mud dome.
+  { name: "biberburg", stage: "parr", at: 1022, season: "summer", hour: 13, view: { eye: [-11.5, 40.5, 1.6], target: [-6.8, 46, 0.8] } },
 ];
 
 const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));

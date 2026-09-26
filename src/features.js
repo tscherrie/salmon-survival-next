@@ -36,7 +36,8 @@ import { relaid, COLD_SPRINGS, CRACKS, FALLS, ISLANDS, KING_POOL, MILLS, S, TRIB
 import { MODEL_LENGTH, createFishMesh } from "./anatomy.js";
 import { SolidBatch, bankGrass, fallenLeaf, hangingMoss, leafSpray, mossTuft, reeds, sedge, turfTuft } from "./flora.js";
 import { TreeBatch, alder, birch, fallenTrunk, fern, forestMaterial, roots, shrub, willow } from "./forest.js";
-import { trunkColliders, trunkGeometry } from "./terrain.js";
+import { trunkColliders } from "./terrain.js";
+import { WoodBatch, woodLimb } from "./wood.js";
 import { addPlace } from "./places.js";
 import { PointCloud, perPoint, photo, pointCloud } from "./materials.js";
 import { addClearing } from "./clearings.js";
@@ -51,7 +52,7 @@ import { nettingMaterial } from "./netting.js";
 //
 // A feature is { id, s, reach, build(ctx) } -- build a generator that fills ctx.group,
 // ctx.plants (a GeometryBatch of foliage), ctx.trees (a TreeBatch, forest.js), ctx.stones (a RockBatch
-// of rock), ctx.wood (trunk geometries) and ctx.colliders / ctx.cover, yielding now and then
+// of rock), ctx.wood (a WoodBatch, wood.js) and ctx.colliders / ctx.cover, yielding now and then
 // so a frame never stalls.
 
 export const FEATURES = [];
@@ -201,7 +202,7 @@ for (const q of ISLANDS) {
           ctx.locate(p.x, p.z, s, r);
           p.y = Math.max(bed(r.s, r.u) + radius * 0.7, Math.min(lv - radius * 0.2, bed(r.s, r.u) + radius * 2.5));
         }
-        ctx.wood.push(trunkGeometry(points, radius, radius * 0.7, q.from + k * 3.1));
+        woodLimb(ctx.wood, points, radius, radius * 0.7, { kind: "drift", seed: q.from + k * 3.1, bright: 0.6 });
         trunkColliders(points, radius, radius * 0.7, ctx.colliders);
         ctx.cover.push({ x: cx, z: cz, radius: length * 0.35, top: lv });
         yield "drift";
@@ -284,7 +285,7 @@ for (const b of TRIBUTARIES) {
           const y = Math.max(bed(ss, p.u) + 0.2, lv + 2.2 * Math.sin(Math.PI * (0.25 + 0.6 * f)) * (1 - f) - 0.3 * f * f);
           points.push(new THREE.Vector3(at.x, y, at.z));
         }
-        ctx.wood.push(trunkGeometry(points, range(0.06, 0.12), 0.03, b.s + k));
+        woodLimb(ctx.wood, points, range(0.06, 0.12), 0.03, { kind: "branch", seed: b.s + k, bright: 0.55, moss: 0.4 });
         const curve = new THREE.CatmullRomCurve3(points);
         for (let q = 0; q < 7; q++) leafSpray(ctx.plants, curve.getPoint(range(0.5, 1)), random, range(0.7, 1));
         ctx.cover.push({ x: points[3].x, z: points[3].z, radius: 2.2, top: lv });
@@ -462,7 +463,7 @@ addFeature({
       const a = at2(-5, -1.8, floor + 0.35),
         b = at2(1, 0.6, floor + 0.25),
         e = at2(5, 2.2, floor + 0.45);
-      ctx.wood.push(trunkGeometry([new THREE.Vector3(a.x, a.y, a.z), new THREE.Vector3(b.x, b.y, b.z), new THREE.Vector3(e.x, e.y, e.z)], 0.28, 0.1, 3835));
+      woodLimb(ctx.wood, [new THREE.Vector3(a.x, a.y, a.z), new THREE.Vector3(b.x, b.y, b.z), new THREE.Vector3(e.x, e.y, e.z)], 0.28, 0.1, { kind: "twig", seed: 3835, end0: "snapped", bright: 0.55 });
     }
     yield "inside";
     // Boulders round it.
@@ -520,7 +521,6 @@ for (const q of UNDERCUTS) {
       yield "lid";
       // Its edge: grass hanging over, roots down into the water; the lid as colliders; the
       // pocket as cover.
-      const tubes = [];
       for (let s = s0; s <= s1; s += 1.4) {
         const c = section(s);
         const lv = level(s);
@@ -537,7 +537,7 @@ for (const q of UNDERCUTS) {
             place(s + range(-0.2, 0.2), u - q.side * f * 0.4, at);
             points.push(new THREE.Vector3(at.x, lv - 0.5 - drop * f, at.z));
           }
-          tubes.push(trunkGeometry(points, range(0.03, 0.07), 0.015, s));
+          woodLimb(ctx.wood, points, range(0.03, 0.07), 0.015, { kind: "root", seed: s, bright: 0.45 });
         }
         const mid = c.thalweg + q.side * 1.12 * c.half;
         place(s, mid, at);
@@ -545,7 +545,6 @@ for (const q of UNDERCUTS) {
         ctx.cover.push({ x: at.x, z: at.z, radius: Math.max(2.5, c.half * 0.2), top: lv });
         if (Math.round(s * 10) % 3 === 0) yield "edge";
       }
-      ctx.wood.push(...tubes);
     },
   });
 }
@@ -620,7 +619,7 @@ addFeature({
         const floor = bed(r.s, r.u);
         points.push(new THREE.Vector3(x, Math.min(lv + radius * 0.3, floor + radius + range(0, 4) * (k / 11)), z));
       }
-      ctx.wood.push(trunkGeometry(points, radius, radius * 0.6, 4620 + k));
+      woodLimb(ctx.wood, points, radius, radius * 0.6, { kind: "drift", seed: 4620 + k, bright: 0.6 });
       trunkColliders(points, radius, radius * 0.6, ctx.colliders);
       yield "log";
     }
@@ -685,7 +684,7 @@ for (const b of TRIBUTARIES) {
         const a = new THREE.Vector3(at.x, y + (kind < 0.9 ? range(-0.1, 0.1) : -len * 0.4), at.z);
         place(q2.s, q2.u, at);
         const c2 = new THREE.Vector3(at.x, y + (kind < 0.7 ? range(-0.1, 0.1) : kind < 0.9 ? range(-0.8, 0.8) : len * 0.4), at.z);
-        ctx.wood.push(trunkGeometry([a, a.clone().lerp(c2, 0.5).add(new THREE.Vector3(0, range(-0.05, 0.08), 0)), c2], range(0.05, 0.11), 0.04, k));
+        woodLimb(ctx.wood, [a, a.clone().lerp(c2, 0.5).add(new THREE.Vector3(0, range(-0.05, 0.08), 0)), c2], range(0.05, 0.11), 0.04, { kind: "stick", seed: k, bright: 1, moss: 0.2 });
         if (k % 10 === 9) yield "dam";
       }
       // The dam as colliders, all but the hole.
@@ -705,6 +704,14 @@ for (const b of TRIBUTARIES) {
       const R = 3.2;
       // The lodge's mud-plastered heart.
       ctx.lump(at.x, base + R * 0.2, at.z, R * 0.82, R * 0.62, R * 0.82, range(0, TAU), mud);
+      // The sticks laid on it, bent over the dome in layers (each point of a stick set on
+      // the mud's surface and a little out from it), not stuck into the air round it.
+      const heart = new THREE.Vector3(at.x, base + R * 0.2, at.z);
+      const onDome = (q, lift) => {
+        const v = q.clone().sub(heart);
+        const onto = 1 / Math.hypot(v.x / (R * 0.82), v.y / (R * 0.62), v.z / (R * 0.82));
+        return heart.clone().addScaledVector(v, onto).addScaledVector(v.normalize(), lift);
+      };
       for (let k = 0; k < 90; k++) {
         const theta = range(0, TAU),
           phi = range(0.1, 1.3);
@@ -713,7 +720,8 @@ for (const b of TRIBUTARIES) {
           y = base + Math.sin(phi) * R * 0.8;
         const d = new THREE.Vector3(-Math.sin(theta), range(-0.3, 0.3), Math.cos(theta)).multiplyScalar(range(0.8, 1.8));
         const p = new THREE.Vector3(x, y, z);
-        ctx.wood.push(trunkGeometry([p.clone().sub(d), p, p.clone().add(d)], range(0.05, 0.1), 0.04, 500 + k));
+        const lift = 0.07 + (k / 90) * 0.3;
+        woodLimb(ctx.wood, [onDome(p.clone().sub(d), lift), onDome(p, lift), onDome(p.clone().add(d), lift)], range(0.05, 0.1), 0.04, { kind: "stick", seed: 500 + k, bright: 1, moss: 0.2 });
         if (k % 15 === 14) yield "lodge";
       }
       ctx.colliders.push({ x: at.x, y: base + R * 0.4, z: at.z, r: R * 0.9, ry: R * 0.7 });
@@ -1155,7 +1163,7 @@ addFeature({
       place(s, u, at);
       pts.push(new THREE.Vector3(at.x, bed(s, u) + 1.2, at.z));
     }
-    ctx.wood.push(trunkGeometry(pts, 1.1, 0.7, 7));
+    woodLimb(ctx.wood, pts, 1.1, 0.7, { kind: "drowned", seed: 7, bright: 0.6, moss: 0.9 });
     trunkColliders(pts, 1.1, 0.7, ctx.colliders);
   },
 });
@@ -1287,7 +1295,7 @@ addFeature({
     const up = boat(0, 0, 1).sub(boat(0, 0, 0));
     const foot = boat(length * 0.12, 0, sheer(0.62) - 0.5);
     const top = foot.clone().addScaledVector(up, 24);
-    ctx.wood.push(trunkGeometry([foot, foot.clone().lerp(top, 0.5), top], 0.9, 0.7, 3));
+    woodLimb(ctx.wood, [foot, foot.clone().lerp(top, 0.5), top], 0.9, 0.7, { kind: "mast", seed: 3, bright: 0.55 });
     trunkColliders([foot, foot.clone().lerp(top, 0.5), top], 0.9, 0.7, ctx.colliders);
     const lie0 = top.clone().addScaledVector(ax, 3).setY(0);
     const lie1 = lie0.clone().addScaledVector(ax, 20).addScaledVector(side, -6);
@@ -1295,7 +1303,7 @@ addFeature({
       l1 = ctx.locate(lie1.x, lie1.z);
     lie0.y = bed(l0.s, l0.u) + 0.6;
     lie1.y = bed(l1.s, l1.u) + 0.6;
-    ctx.wood.push(trunkGeometry([lie0, lie0.clone().lerp(lie1, 0.5), lie1], 0.7, 0.55, 4));
+    woodLimb(ctx.wood, [lie0, lie0.clone().lerp(lie1, 0.5), lie1], 0.7, 0.55, { kind: "mast", seed: 4, bright: 0.55 });
     trunkColliders([lie0, lie0.clone().lerp(lie1, 0.5), lie1], 0.7, 0.55, ctx.colliders);
     // The rails along both gunwales, posts and a top rail, broken away in places; two
     // bollards on the foredeck.
@@ -1884,7 +1892,7 @@ export function createFeatures(scene, { rocks, locate, surfaceMaterial = null })
       plants: new GeometryBatch(),
       trees: new TreeBatch(),
       stones: new RockBatch(),
-      wood: [],
+      wood: new WoodBatch(),
       colliders: [],
       cover: [],
       f: {},
@@ -1985,15 +1993,8 @@ export function createFeatures(scene, { rocks, locate, surfaceMaterial = null })
       mesh.name = "Stones";
       group.add(mesh);
     }
-    for (const g of ctx.wood) {
-      const colors = new Float32Array(g.attributes.position.count * 3);
-      for (let v = 0; v < colors.length; v += 3) {
-        colors[v] = 0.55;
-        colors[v + 1] = 0.45;
-        colors[v + 2] = 0;
-      }
-      g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-      const mesh = new THREE.Mesh(g, rocks.wood);
+    if (!ctx.wood.empty) {
+      const mesh = new THREE.Mesh(ctx.wood.geometry(), rocks.wood);
       mesh.castShadow = mesh.receiveShadow = true;
       mesh.name = "Wood";
       group.add(mesh);

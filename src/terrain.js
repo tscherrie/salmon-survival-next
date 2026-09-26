@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { RockBatch, chooseRock, rockSet, rockWeights, topAt } from "./render/rocks.js";
+import { WoodBatch, legacyTubeVertices, woodLimb } from "./wood.js";
 import { GeometryBatch, randomGenerator } from "./render/geometry.js";
 import { PLANT_FADE, foliageMaterial, plantShare } from "./render/foliage.js";
 import { FALLS, MILLS, S, TRIBUTARIES, bedDetail, current, frame, level, locate, passSlot, place, section, smooth, tributaryAt } from "./course.js";
@@ -517,6 +518,9 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
     }
     yield "cobbles";
 
+    // The block's wood, all of it one draw (src/wood.js).
+    const woodBatch = new WoodBatch();
+
     // A drowned trunk now and then, in the brook and the river.
     if (random() < (r.brook + r.upper) * 0.3 + r.middle * 0.25 + r.lower * 0.3 + r.estuary * 0.1) {
       const p = pick();
@@ -533,18 +537,12 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
           points.push(new THREE.Vector3(x, Math.min(level(probeS) - 0.8, floor + range(0.6, 2.2)), z));
         }
         const radius = range(0.7, 1.6) * (0.6 + 0.6 * (r.upper + r.middle));
-        const geometry = trunkGeometry(points, radius, radius * 0.6, block.i * 1.7 + block.j);
-        const colors = new Float32Array(geometry.attributes.position.count * 3);
-        for (let k = 0; k < colors.length; k += 3) {
-          colors[k] = range(0.55, 0.8);
-          colors[k + 1] = 0.9;
-          colors[k + 2] = 0;
-        }
-        geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-        const mesh = new THREE.Mesh(geometry, rocks.wood);
-        mesh.castShadow = mesh.receiveShadow = true;
-        mesh.name = "Drowned trunk";
-        group.add(mesh);
+        // (Its shade from as many draws as the old tube had vertices, each once drawn for a
+        // vertex's shade: the block's stream after it must stay as it was.)
+        const draws = legacyTubeVertices(points, radius);
+        let shade = 0;
+        for (let k = 0; k < draws; k++) shade += range(0.55, 0.8);
+        woodLimb(woodBatch, points, radius, radius * 0.6, { kind: "drowned", seed: block.i * 1.7 + block.j, bright: shade / draws, moss: 0.9 });
         trunkColliders(points, radius, radius * 0.6, colliders, { s: p.s, u: p.u });
         cover.push({ x: p.x, z: p.z, radius: length * 0.45, top: p.y + 4 });
       }
@@ -714,7 +712,6 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
       // Alder and willow branches reaching out over the water from the bank, the leafy
       // ends hanging into it: from under the surface, the forest leaning in.
       const branches = poisson(((r.brook + r.upper * 0.7 + r.middle * 0.35) * size) / 22);
-      const wood = [];
       for (let k = 0; k < branches; k++) {
         const s = s0 + range(2, size - 2);
         const cs = section(s);
@@ -743,7 +740,7 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
           points.push(new THREE.Vector3(at.x, y, at.z));
         }
         const radius = range(0.07, 0.16) * scale;
-        wood.push(trunkGeometry(points, radius, radius * 0.3, block.i * 5.3 + k * 1.7));
+        woodLimb(woodBatch, points, radius, radius * 0.3, { kind: "branch", seed: block.i * 5.3 + k * 1.7, bright: 0.55, moss: 0.4 });
         const curve = new THREE.CatmullRomCurve3(points);
         const sprays = Math.floor(range(6, 11));
         for (let q = 0; q < sprays; q++) {
@@ -752,19 +749,6 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
         }
         cover.push({ x: points[3].x, z: points[3].z, radius: 2.5 * scale, top: lv });
         yield "branches";
-      }
-      for (const geometry of wood) {
-        const colors = new Float32Array(geometry.attributes.position.count * 3);
-        for (let v = 0; v < colors.length; v += 3) {
-          colors[v] = 0.55;
-          colors[v + 1] = 0.4;
-          colors[v + 2] = 0;
-        }
-        geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-        const mesh = new THREE.Mesh(geometry, rocks.wood);
-        mesh.castShadow = mesh.receiveShadow = true;
-        mesh.name = "Branch";
-        group.add(mesh);
       }
     }
     // The little brook at the spring: close and overgrown. Sedge and grass hang in from both
@@ -792,7 +776,6 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
         cover.push({ x: at.x, z: at.z, radius: 2.2, top: level(s) });
       }
       // Roots out of the bank.
-      const tubes = [];
       const clusters = Math.floor(small * range(1, 4));
       for (let k = 0; k < clusters; k++) {
         const s = s0 + range(2, size - 2);
@@ -813,16 +796,10 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
             place(ss + range(-0.2, 0.2) * f, uu, at);
             points.push(new THREE.Vector3(at.x, Math.max(bedDetail(ss, uu, null) + 0.08, lv + 0.6 - drop * f * f), at.z));
           }
-          tubes.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 14, range(0.03, 0.11), 5, false));
+          const thick = range(0.03, 0.11);
+          woodLimb(woodBatch, points, thick, thick * 0.3, { kind: "root", seed: ss * 3.7 + q, bright: 0.45, moss: 0.6 });
         }
         yield "roots";
-      }
-      if (tubes.length) {
-        const merged = mergeTubes(tubes);
-        const mesh = new THREE.Mesh(merged, rocks.wood);
-        mesh.castShadow = mesh.receiveShadow = true;
-        mesh.name = "Roots";
-        group.add(mesh);
       }
       // Twigs and small branches on the bed.
       const twigs = Math.floor(small * range(1, 5));
@@ -833,19 +810,19 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
         const length = range(2, 7);
         const points = [0, 1, 2].map((q) => {
           const t = q / 2 - 0.5;
-          return new THREE.Vector3(p.x + Math.cos(a) * length * t, p.y + 0.12 + Math.abs(t) * range(0, 0.4), p.z + Math.sin(a) * length * t);
+          // (Lying on the bed, its ends a little raised.)
+          return new THREE.Vector3(p.x + Math.cos(a) * length * t, p.y + 0.06 + Math.abs(t) * range(0, 0.4) * 0.3, p.z + Math.sin(a) * length * t);
         });
         const radius = range(0.05, 0.16);
-        const geometry = trunkGeometry(points, radius, radius * 0.5, block.i * 3.1 + k);
-        const colors = new Float32Array(geometry.attributes.position.count * 3).fill(0.6);
-        for (let v = 1; v < colors.length; v += 3) colors[v] = 0.8;
-        geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-        const mesh = new THREE.Mesh(geometry, rocks.wood);
-        mesh.castShadow = mesh.receiveShadow = true;
-        mesh.name = "Twig";
-        group.add(mesh);
+        woodLimb(woodBatch, points, radius, radius * 0.5, { kind: "twig", seed: block.i * 3.1 + k, bright: 0.6, moss: 0.8 });
       }
       void c;
+    }
+    if (!woodBatch.empty) {
+      const mesh = new THREE.Mesh(woodBatch.geometry(), rocks.wood);
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.name = "Wood";
+      group.add(mesh);
     }
     let plantMesh = null;
     if (plants.positions.length) {
@@ -1093,40 +1070,6 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
   };
 }
 
-// Tubes (roots) into one geometry, with the colour channels the wood material reads.
-export function mergeTubes(list) {
-  let vertices = 0,
-    count = 0;
-  for (const g of list) {
-    vertices += g.attributes.position.count;
-    count += g.index.count;
-  }
-  const positions = new Float32Array(vertices * 3),
-    normals = new Float32Array(vertices * 3),
-    colors = new Float32Array(vertices * 3),
-    indices = new Uint32Array(count);
-  let v = 0,
-    i = 0;
-  for (const g of list) {
-    positions.set(g.attributes.position.array, v * 3);
-    normals.set(g.attributes.normal.array, v * 3);
-    const index = g.index.array;
-    for (let k = 0; k < index.length; k++) indices[i + k] = index[k] + v;
-    v += g.attributes.position.count;
-    i += index.length;
-    g.dispose();
-  }
-  for (let k = 0; k < colors.length; k += 3) {
-    colors[k] = 0.45;
-    colors[k + 1] = 0.6;
-  }
-  const merged = new THREE.BufferGeometry();
-  merged.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  merged.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
-  merged.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  merged.setIndex(new THREE.BufferAttribute(indices, 1));
-  return merged;
-}
 
 // Stone shapes carry their shade in a colour attribute; the rock material reads red as
 // brightness and green as the share of moss, so both are kept in the shape's own colour.
@@ -1149,75 +1092,6 @@ function onStone(top, q) {
   return q;
 }
 
-// A drowned trunk or a twig: a tapering tube along a curve, its bark roughened, cheap
-// enough to build in a frame.
-export function trunkGeometry(points, r0, r1, seed) {
-  const curve = new THREE.CatmullRomCurve3(points);
-  const length = curve.getLength();
-  const rows = Math.max(6, Math.min(48, Math.ceil(length * 1.2)));
-  const cols = r0 > 0.4 ? 14 : 8;
-  const frames = curve.computeFrenetFrames(rows, false);
-  const positions = [],
-    normals = [],
-    indices = [];
-  const p = new THREE.Vector3(),
-    n = new THREE.Vector3();
-  for (let i = 0; i <= rows; i++) {
-    const t = i / rows;
-    curve.getPointAt(t, p);
-    const radius = r0 + (r1 - r0) * t;
-    for (let j = 0; j <= cols; j++) {
-      const a = (j / cols) * Math.PI * 2;
-      const bark = 1 + 0.08 * Math.sin(a * 5 + seed + t * 9) + 0.05 * Math.sin(t * length * 3 + a * 2 + seed);
-      n.copy(frames.normals[i]).multiplyScalar(Math.cos(a)).addScaledVector(frames.binormals[i], Math.sin(a));
-      positions.push(p.x + n.x * radius * bark, p.y + n.y * radius * bark, p.z + n.z * radius * bark);
-      normals.push(n.x, n.y, n.z);
-      if (i < rows && j < cols) {
-        const k = i * (cols + 1) + j;
-        indices.push(k, k + 1, k + cols + 1, k + 1, k + cols + 2, k + cols + 1);
-      }
-    }
-  }
-  // The two ends sawn or broken off, not open: a rim, the heartwood a little sunk in.
-  const t0 = new THREE.Vector3();
-  for (const end of [0, 1]) {
-    const i = end * rows;
-    curve.getPointAt(end, p);
-    curve.getTangentAt(end, t0);
-    const outward = end ? 1 : -1;
-    const radius = r0 + (r1 - r0) * end;
-    const rim = positions.length / 3;
-    for (let j = 0; j < cols; j++) {
-      const k = (i * (cols + 1) + j) * 3;
-      positions.push(positions[k], positions[k + 1], positions[k + 2]);
-      normals.push(t0.x * outward, t0.y * outward, t0.z * outward);
-    }
-    const inner = positions.length / 3;
-    for (let j = 0; j < cols; j++) {
-      const a = (j / cols) * Math.PI * 2;
-      n.copy(frames.normals[i]).multiplyScalar(Math.cos(a)).addScaledVector(frames.binormals[i], Math.sin(a));
-      const r = radius * (0.72 + 0.06 * Math.sin(a * 3 + seed));
-      const sink = -outward * radius * 0.08;
-      positions.push(p.x + n.x * r + t0.x * sink, p.y + n.y * r + t0.y * sink, p.z + n.z * r + t0.z * sink);
-      normals.push(t0.x * outward, t0.y * outward, t0.z * outward);
-    }
-    const centre = positions.length / 3;
-    const sink = -outward * radius * 0.16;
-    positions.push(p.x + t0.x * sink, p.y + t0.y * sink, p.z + t0.z * sink);
-    normals.push(t0.x * outward, t0.y * outward, t0.z * outward);
-    for (let j = 0; j < cols; j++) {
-      const j1 = (j + 1) % cols;
-      // Seen from outside the end the ring runs anticlockwise at the far end, clockwise at the near.
-      if (end) indices.push(rim + j, rim + j1, inner + j1, rim + j, inner + j1, inner + j, centre, inner + j, inner + j1);
-      else indices.push(rim + j1, rim + j, inner + j, rim + j1, inner + j, inner + j1, centre, inner + j1, inner + j);
-    }
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
-  geometry.setIndex(indices);
-  return geometry;
-}
 
 // What a trunk is to a fish swimming into it: spheres all along it, close enough that
 // nothing slips between them (not just one at each of the points it was drawn through).

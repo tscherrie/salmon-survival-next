@@ -4,7 +4,7 @@ import { mix, positionWorld, sin, smoothstep, step, vertexColor } from "three/ts
 import { MODEL_LENGTH, createFishMesh } from "./anatomy.js";
 import { bed, current, frame, level, locate, place, regionWeights, section } from "./course.js";
 import { conditions } from "./seasons.js";
-import { mergeTubes, trunkGeometry } from "./terrain.js";
+import { WoodBatch, woodLimb } from "./wood.js";
 
 // What happens now and then on the river, beyond the round of the days and the seasons:
 //
@@ -160,17 +160,17 @@ export function createEvents(scene, { rocks, sound, daylight, life, random = Mat
   for (let k = 0; k < 6; k++) {
     // A torn-off branch: a stem with a few side twigs.
     const length = range(7, 13);
-    const tubes = [];
+    const wood = new WoodBatch();
     const pts = [];
     for (let i = 0; i <= 4; i++) pts.push(new THREE.Vector3((i / 4 - 0.5) * length, Math.sin(i * 1.3 + k) * 0.35, Math.cos(i * 1.7 + k) * 0.35));
-    tubes.push(trunkGeometry(pts, range(0.28, 0.4), 0.12, 91 + k));
+    woodLimb(wood, pts, range(0.28, 0.4), 0.12, { kind: "branch", seed: 91 + k, end0: "snapped", bright: 0.55, moss: 0.3 });
     for (let j = 0; j < 3; j++) {
       const base = pts[1 + j].clone();
       const dir = new THREE.Vector3(range(-0.3, 0.6), range(-0.5, 0.8), j % 2 ? 1 : -1).normalize();
       const tip = base.clone().addScaledVector(dir, range(2, 4));
-      tubes.push(trunkGeometry([base, base.clone().lerp(tip, 0.5), tip], range(0.08, 0.14), 0.03, 7 * k + j));
+      woodLimb(wood, [base, base.clone().lerp(tip, 0.5), tip], range(0.08, 0.14), 0.03, { kind: "twig", seed: 7 * k + j, end0: "hidden", bright: 0.55, moss: 0.3 });
     }
-    const mesh = new THREE.Mesh(mergeTubes(tubes), rocks.wood);
+    const mesh = new THREE.Mesh(wood.geometry(), rocks.wood);
     mesh.rotation.order = "YXZ";
     mesh.castShadow = true;
     mesh.visible = false;

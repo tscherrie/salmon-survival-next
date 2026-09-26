@@ -32,6 +32,7 @@ import {
   modelViewMatrix,
   modelWorldMatrix,
   normalGeometry,
+  normalMap,
   normalize,
   normalWorldGeometry,
   perspectiveDepthToViewZ,
@@ -59,7 +60,7 @@ import {
   viewportDepthTexture,
   viewportSharedTexture,
 } from "three/tsl";
-import { RIPPLE_COUNT, RIPPLE_SPEED, SUN_DIRECTION, river, waterLit, waterTime } from "./render/water.js";
+import { RIPPLE_COUNT, RIPPLE_SPEED, SUN_DIRECTION, river, surfaceLevelAt, waterLit, waterTime } from "./render/water.js";
 import { surfaceWaves } from "./render/caustics.js";
 import { extinction, fogNodes, underwaterInscatter, waterBetween } from "./render/fog.js";
 import { mirrorMap, mirrorOn, windowMap, windowOn } from "./render/mirror.js";
@@ -1307,6 +1308,48 @@ const noise3 = Fn(([p]) => {
 });
 export { noise3 };
 
+// Wood (src/wood.js WoodBatch): the bark photograph laid on along the grain (its uv goes
+// round a limb in whole turns and along it), bare weathered wood where the bark has come off
+// (colour.b), end grain where a limb was sawn (colour.b = 1), moss on what faces up
+// (colour.g), and above the water paler and greyer.
+function woodMaterial(bark, barkNormal) {
+  const material = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.88 });
+  const woodBare = property("float", "woodBare");
+  material.colorNode = Fn(() => {
+    const P = positionWorld;
+    const Nw = normalWorldGeometry;
+    const vc = vertexColor();
+    const at = uv();
+    const end = step(0.95, vc.b);
+    const bare = smoothstep(0.3, 0.7, vc.b).mul(end.oneMinus());
+    const barkColor = texture(bark, at).rgb;
+    // Bare wood: grey-brown going silver, the grain running along the limb (a whole number
+    // of stripes round it, so no seam).
+    const grain = sin(at.x.mul(Math.PI * 2 * 9).add(noise2(at.mul(vec2(3, 0.4))).mul(5))).mul(0.07).add(0.93);
+    // (Freshly peeled -- a beaver's stick, marked brighter -- it is pale and warm.)
+    const peeled = smoothstep(0.72, 0.92, vc.r);
+    const bareColor = mix(mix(vec3(0.34, 0.29, 0.22), vec3(0.52, 0.5, 0.45), noise2(at.mul(vec2(2, 0.3)))), vec3(0.78, 0.7, 0.55), peeled).mul(grain);
+    // End grain: the rings round the pith.
+    const rings = fract(length(at).mul(9).add(noise2(at.mul(3)).mul(0.7)));
+    const endColor = mix(vec3(0.46, 0.36, 0.24), vec3(0.3, 0.22, 0.14), smoothstep(0.3, 0.7, rings));
+    const c = mix(mix(barkColor, bareColor, bare), endColor, end).mul(vc.r).toVar();
+    // Moss on what faces up.
+    const n = noise3(P.mul(1.7)).mul(0.6).add(noise3(P.mul(5.3)).mul(0.4));
+    const cap = smoothstep(0.15, 0.8, Nw.y.add(n.sub(0.5).mul(0.6))).mul(vc.g).mul(end.oneMinus()).mul(0.85);
+    const growth = mix(vec3(0.035, 0.065, 0.02), vec3(0.12, 0.15, 0.05), noise3(P.mul(9))).mul(dot(barkColor, vec3(0.3, 0.55, 0.15)).mul(1.3).add(0.45));
+    // Above the water: dry, paler and greyer, the moss thinning out.
+    const dry = smoothstep(0.1, 0.8, P.y.sub(surfaceLevelAt(P)));
+    c.assign(mix(c, growth, cap.mul(dry.mul(-0.7).add(1))));
+    c.assign(mix(c, mix(vec3(dot(c, vec3(0.3, 0.55, 0.15))), c, 0.6).mul(1.25), dry));
+    woodBare.assign(max(bare, end));
+    return vec4(c, 1);
+  })();
+  // The bark's relief from its own normal map; bare wood and end grain much smoother.
+  material.normalNode = normalMap(texture(barkNormal, uv()), vec2(woodBare.oneMinus().mul(0.85).add(0.15)));
+  waterLit(material);
+  return material;
+}
+
 export async function createRockMaterials() {
   const [mossy, mossyNormal, face, faceNormal, sea, seaNormal, bark, barkNormal] = await Promise.all([
     load("mossy_rock_diff", true),
@@ -1318,29 +1361,6 @@ export async function createRockMaterials() {
     load("pine_bark_diff", true),
     load("pine_bark_nor_gl", false),
   ]);
-  // Wood: the photograph from all three sides, the vertex colour's red its shade and green
-  // its share of moss, capped on the side facing the light.
-  const make = (map, normalMap, { scale, grey, moss }) => {
-    // (The vertex colours are read by the colour node itself: not multiplied in again.)
-    const material = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.85 });
-    const rockNormal = property("vec3", "rockNormal");
-    material.colorNode = Fn(() => {
-      const P = positionWorld;
-      const Nw = normalWorldGeometry;
-      const rock = triplanar(map, normalMap, P, Nw, 1 / scale);
-      const c = mix(vec3(dot(rock.color, vec3(0.3, 0.55, 0.15))), rock.color, 1 - grey);
-      rockNormal.assign(normalize(mix(Nw, rock.normal, 0.8)));
-      // Moss and algae on the side facing the light.
-      const n = noise3(P.mul(1.3)).mul(0.6).add(noise3(P.mul(4.1)).mul(0.4));
-      const vColor = vertexColor();
-      const cap = smoothstep(0.1, 0.75, Nw.y.add(n.sub(0.5).mul(0.7))).mul(moss).mul(vColor.g);
-      const growth = mix(vec3(0.05, 0.085, 0.025), vec3(0.14, 0.17, 0.06), noise3(P.mul(11)));
-      return vec4(mix(c.mul(vColor.r), growth, cap.mul(0.9)), 1);
-    })();
-    material.normalNode = toViewNormal(rockNormal);
-    waterLit(material);
-    return material;
-  };
   // Stone (render/rocks.js RockBatch): the photograph from all three sides; each vertex
   // brings its shade and hollows (colour.r), where moss would take and how much grows there
   // (colour.g, worked out as the stone lies), its height over its seat and over the water
@@ -1404,8 +1424,8 @@ export async function createRockMaterials() {
     sea: [sea, seaNormal, { scale: 4.5, grey: 0.2, moss: 0.25 }],
   };
   const set = {
-    // Drowned trunks and roots.
-    wood: make(bark, barkNormal, { scale: 9, grey: 0.1, moss: 0.5 }),
+    // Everything of wood in and by the water (src/wood.js).
+    wood: woodMaterial(bark, barkNormal),
   };
   for (const [kind, [map, normalMap, options]] of Object.entries(kinds)) set[kind] = stone(map, normalMap, options);
   return set;
