@@ -1847,6 +1847,11 @@ async function start() {
           ripples.add(e.x, e.z, 1.4);
           sound.splash(0.35, 4);
           break;
+        case "underFloe":
+          // Up against a floe: a hollow knock (the event comes every frame it is pressed
+          // there; the sound keeps to one knock a while).
+          if (e.bump > 0.2) sound.thump("ice", clamp(e.bump / 2, 0.4, 1.2));
+          break;
         case "floes":
           hud.tip("floes", "<b>Eisgang!</b> Das Eis bricht auf, Schollen treiben flussab. Unter ihnen kommst du nicht an die Luft.", 9);
           feat("floes", { delay: 2 });

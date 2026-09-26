@@ -188,12 +188,22 @@ export function makeBurst(count, spread, low) {
   for (let i = 0; i < count; i++) bubbleInto(left, right, Math.random() * spread, random(350, 1250) * low, random(0.5, 1), random(-0.8, 0.8));
   return [left, right];
 }
-export const KNOCKS = ["body", "rock", "wood", "net", "hook"];
+export const KNOCKS = ["body", "rock", "wood", "net", "hook", "ice"];
 // Knocks, each a few modes ringing and a click: a blow to the body (a dull knock, 200-300
 // Hz, that a phone can still play), stone, wood (the mill's paddles, a branch), the net's
 // mesh rasping over the scales, a hook's tick.
 export function makeKnock(kind) {
-  const d = mono(0.45);
+  const d = mono(kind === "ice" ? 0.8 : 0.45);
+  if (kind === "ice") {
+    // Ice: a hollow "tonk", the floe ringing over the water under it, and a click.
+    const f = random(90, 100);
+    ring(d, 0, f, 0.12, 0.6);
+    ring(d, 0, f * 2, 0.08, 0.5);
+    ring(d, 0, random(400, 420), 0.05, 0.6);
+    ring(d, 0, random(800, 840), 0.02, 0.35);
+    hiss(d, 0, "bandpass", 3000, 1.5, 0.002, 0.4);
+    return [fadeOut(d, 0.1)];
+  }
   if (kind === "rock") {
     ring(d, 0, random(560, 700), 0.018, 0.7);
     ring(d, 0, random(1300, 1600), 0.01, 0.45);

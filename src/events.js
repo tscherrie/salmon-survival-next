@@ -741,9 +741,11 @@ export function createEvents(scene, { rocks, sound, daylight, life, random = Mat
       if (lx * lx + lz * lz < 1) {
         const ceiling = f.position.y - fish.length * 0.18;
         if (fish.position.y > ceiling && !fish.airborne) {
+          // (How hard it came up against the ice, for the knock.)
+          const bump = Math.max(0, fish.relative.y);
           fish.position.y = ceiling;
           if (fish.relative.y > 0) fish.relative.y = 0;
-          happened.push({ type: "underFloe" });
+          happened.push({ type: "underFloe", bump });
         }
       }
     }

@@ -196,6 +196,17 @@ if (get("bed_sea_swell")?.extra) {
   const e = get("bed_sea_swell").extra;
   check(`the sea heaves at 150-500 Hz: ${e.swell} dB, every ${e.period} s`, e.swell >= 2 && e.period >= 8 && e.period <= 12);
 }
+// Rain pings from below (bright: past the water's top), none under ice; a flood clatters.
+if (get("bed_rain")) check(`bed_rain about -25 LUFS: ${get("bed_rain").full}`, Math.abs(get("bed_rain").full + 25) <= 1.5);
+if (get("bed_rain_under") && get("bed_river")) {
+  const [a, b] = [get("bed_rain_under").bands[4], get("bed_river").bands[4]];
+  check(`bed_rain_under: ${a} % above 4 kHz (≥ 5, and ≥ 4 times bed_river's ${b})`, a >= 5 && a >= 4 * b);
+}
+if (get("bed_ice") && get("bed_river")) check(`bed_ice (rain 1): ${get("bed_ice").bands[4]} % above 4 kHz, at most 1.5 times bed_river's (${get("bed_river").bands[4]})`, get("bed_ice").bands[4] <= 1.5 * Math.max(0.1, get("bed_river").bands[4]));
+if (get("bed_flood")?.extra && get("bed_roar_near")) check(`bed_flood clatters at 2-6 kHz (${get("bed_flood").extra.clatter} dB swing), no louder than a fall near by + 2 (${get("bed_flood").full} vs ${get("bed_roar_near").full})`, get("bed_flood").extra.clatter >= 3 && get("bed_flood").full <= get("bed_roar_near").full + 2);
+if (get("floe_knock")) check(`floe_knock ≥ +6 dB over the bed on a phone: ${get("floe_knock").dPhone}`, get("floe_knock").dPhone >= 6);
+// The river's small sounds: heard, but under the bed (400 ms loudness up by +0.3 to +4 dB).
+for (const name of ["ice_chirp"]) if (get(name)) check(`${name} heard but in the ambience (Δ400ms ${get(name).d400}, +0.3..+4)`, get(name).d400 >= 0.3 && get(name).d400 <= 4);
 // Nothing clips: the limiter holds every scene's peaks under full scale.
 const peaky = results.filter((r) => r.peak > -1);
 check(`every scene's peak ≤ -1 dBFS: ${peaky.length ? peaky.map((r) => `${r.name} ${r.peak}`).join(", ") : `loudest ${Math.max(...results.map((r) => r.peak))}`}`, !peaky.length);
