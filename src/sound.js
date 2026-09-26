@@ -99,6 +99,7 @@ const MIX = {
   pad: 0.05,
   ending: 0.6,
   storm: 0.5,
+  home: 0.5,
   crack: 0.7,
 };
 // The leap's sweet spot (main.js: a leap released above this on the swing clears the fall).
@@ -315,6 +316,9 @@ export function createSound() {
     body.connect(world);
     const gillsGain = amp(0);
     loop(bank("gills")[0]).connect(gillsGain).connect(body);
+    // The scent of home, for a spawner on its way back (see update(): `home`).
+    const homeGain = amp(0);
+    loop(bank("home")[0], 0).connect(homeGain).connect(water);
     const ui = amp(MIX.ui);
     ui.connect(master);
 
@@ -411,6 +415,7 @@ export function createSound() {
         pings: knob(pingsGain.gain),
         waterTone: knob(waterTone.frequency, 0.015, 1),
         gills: knob(gillsGain.gain),
+        home: knob(homeGain.gain),
         ambience: knob(ambience.gain),
       },
       // Moved only when the ear crosses the surface, at the pace of the crossing.
@@ -1137,6 +1142,8 @@ export function createSound() {
       steer(k.rainUnder, MIX.rainUnder * rain * open, now, 1.2);
       // (The pings brightest just under the surface, fainter deeper down.)
       steer(k.pings, MIX.pings * rain * open * (0.3 + 0.7 * (1 - depthRel)), now, 1.2);
+      // The home brook's scent: its gurgle and a soft chord, swelling the nearer home.
+      steer(k.home, MIX.home * Math.min(1, home), now, 1.5);
       // The gills working while winded, harder the less breath there is.
       steer(k.gills, winded ? MIX.gills * Math.min(1, Math.max(0.2, 1 - breath / 0.45)) : 0, now, 0.3);
       // (The open sea darker too: its water takes more of the top.)

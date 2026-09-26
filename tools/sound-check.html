@@ -263,6 +263,8 @@
     },
     // Their voices, heard from under the water.
     ...["kingfisher", "heron", "merganser", "seal", "bear"].map((kind) => ({ ...shot(`call_${kind}`, (s) => s.call(kind)), measure: (m) => ({ mid: m.band(4, 5.5, 500, 1500) - m.band(2.5, 4, 500, 1500) }) })),
+    // The scent of home, at its strongest.
+    { name: "bed_home", kind: "bed", params: { home: 1 } },
     { name: "bed_winded", kind: "bed", params: { winded: true, breath: 0.05 }, measure: (m) => ({ gills: m.band(3, 8, 500, 1500), pulse: m.period(3, 8, 500, 1500, 0.1, 0.2, 0.01) }) },
     shot("chime_gold", (s) => s.chime("gold")),
     // The stages of a life: a beaten hunter, growing, hatching, a death with no captor.

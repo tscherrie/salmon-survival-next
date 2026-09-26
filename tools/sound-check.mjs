@@ -217,6 +217,10 @@ if (get("spawn_veil")?.extra) {
   const e = get("spawn_veil").extra;
   check(`spawn_veil: the pad heard (+${e.pad} dB at 200-700 Hz), silent under the veil (${e.veiled} LUFS ≤ -55), the hatch bell rings (+${e.hatch} dB on a phone)`, e.pad >= 1.5 && e.veiled <= -55 && e.hatch >= 6);
 }
+if (get("bed_home") && get("bed_river")) {
+  const d = get("bed_home").full - get("bed_river").full;
+  check(`bed_home: the home brook's scent heard over the river (+${d.toFixed(1)} dB, +1..+5), a phone plays it (${(get("bed_home").full - get("bed_home").phone).toFixed(1)})`, d >= 1 && d <= 5 && get("bed_home").full - get("bed_home").phone <= 3);
+}
 // Weather: the flash cracks, the thunder still rolls, a storm swells up and brightens.
 if (get("lightning_near")) check(`lightning_near ≥ +8 dB at the flash: ${get("lightning_near").dFull}`, get("lightning_near").dFull >= 8);
 if (get("thunder_near")) check(`thunder_near ≥ +6 dB (full band): ${get("thunder_near").dFull}`, get("thunder_near").dFull >= 6);

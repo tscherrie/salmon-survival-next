@@ -894,6 +894,7 @@ async function start() {
   let noseTime = 0;
   let riverFound = false;
   let strangeSaid = -1e9;
+  let homeScent = 0;
   function stepScent(dt) {
     const spawner = phaseOf(fish.stage) === "spawner" && dead <= 0;
     const atSea = fish.river.s > S.coast - 40;
@@ -911,6 +912,8 @@ async function start() {
       if (noseTime > 20) feat("nose", { delay: 2 });
       track("home_river", { seconds: Math.round(noseTime) });
     }
+    // (For the sound: the home brook's scent, the stronger the nearer.)
+    homeScent = scentOn ? Math.sqrt(clamp(st.home, 0, 1)) : 0;
     scentBar.hidden = !scentOn;
     if (!scentOn) return;
     if (atSea) noseTime += dt;
@@ -1634,6 +1637,9 @@ async function start() {
   }
   let veiled = false;
   let deadHushed = false;
+  // The stage and the quarter of it the fish had reached (for the growth stinger).
+  let grownStage = -1,
+    grownQuarter = 0;
   const lastPlace = fish.position.clone();
   const heldPosition = new THREE.Vector3();
   const heldHeading = new THREE.Vector3();
@@ -1778,6 +1784,11 @@ async function start() {
       prof.mark("misc");
       salmon.update(dt, wanted, world);
       prof.mark("salmon");
+      // A quarter of the way further through the stage: two soft notes up.
+      const quarter = Math.floor(fish.progress * 4);
+      if (fish.stage === grownStage && quarter > grownQuarter && quarter < 4) sound.growth();
+      grownStage = fish.stage;
+      grownQuarter = quarter;
       // The account of this life: the way swum; and the siblings dying unseen as it grows.
       const moved = fish.position.distanceTo(lastPlace);
       if (moved < 5) brood.moved(moved);
@@ -2598,6 +2609,8 @@ async function start() {
     soundState.flood = Math.max(events.flood, 0.5 * conditions.flood) * (1 - soundState.sea);
     // (The heart beats for strength running out -- not while the fish is safe or dead.)
     soundState.energy = dead > 0 || fish.safe || celebration.active ? 1 : fish.energy;
+    // Home: its scent on the way, and the redd itself while the hen is courted.
+    soundState.home = redd.on && !spawning ? 0.5 + 0.5 * redd.state.courtship : homeScent;
     soundState.breath = fish.breath;
     soundState.winded = !!fish.winded && dead <= 0;
     sound.update(dt, soundState);

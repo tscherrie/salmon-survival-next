@@ -146,6 +146,31 @@ export function makeGrunt() {
   return [fadeOut(l), fadeOut(r)];
 }
 
+// The scent of the home brook, for a spawner on its way back: the brook's own bright
+// gurgling (600-1500 Hz) and under it a soft chord, A3 E4 A4, the top note beating slowly.
+// 4 s, looped (every tone a whole number of turns in it).
+export function makeHome() {
+  return looped(4, 2, (l, r) => {
+    for (const [d, seed] of [
+      [l, 0],
+      [r, 1.7],
+    ]) {
+      const bands = [700, 1000, 1400].map((f) => biquad("bandpass", f * random(0.95, 1.05), 3));
+      for (let i = 0; i < d.length; i++) {
+        const t = i / RATE;
+        let v = 0;
+        bands.forEach((b, k) => {
+          // (Each band swelling and falling at its own pace, as eddies do.)
+          const swell = Math.pow(0.5 + 0.5 * Math.sin(2 * Math.PI * (0.5 + 0.25 * k) * t + seed + 2 * k), 3);
+          v += swell * b.run(white());
+        });
+        const drone = 0.5 * Math.sin(2 * Math.PI * 220 * t) + 0.35 * Math.sin(2 * Math.PI * 329.5 * t + seed) + 0.25 * (Math.sin(2 * Math.PI * 440 * t) + Math.sin(2 * Math.PI * 440.5 * t));
+        d[i] = 0.12 * v + 0.06 * drone;
+      }
+    }
+  });
+}
+
 // ---- Above the water (heard muffled under it).
 
 // Lightning striking near: a hard crack, the air tearing in quick grains (1-6 kHz), then a
@@ -218,6 +243,8 @@ export function* makeWorld(raw) {
   raw.grunt = many(6, makeGrunt);
   yield;
   raw.ship = many(1, makeShip);
+  yield;
+  raw.home = many(1, makeHome);
   yield;
   raw.crack = many(3, makeCrack, false);
   raw.slap = many(3, makeSlap);
