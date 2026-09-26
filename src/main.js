@@ -1809,8 +1809,13 @@ async function start() {
     for (const e of events.update(dt, { fish, time, dead })) {
       switch (e.type) {
         case "storm":
+          sound.storm();
           hud.note("Ein Gewitter zieht auf …");
           hud.tip("storm", "<b>Gewitter!</b> Blitz und Donner – und bald kommt die Sturzflut: Das Wasser steigt, wird braun und reißend, Äste treiben herab. Halt dich hinter großen Steinen und am Grund.", 11);
+          break;
+        case "lightning":
+          // The crack with the flash; the thunder follows (events.js).
+          sound.lightning(e.near);
           break;
         case "branch":
           shake = Math.max(shake, 0.8);

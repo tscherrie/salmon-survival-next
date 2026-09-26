@@ -217,6 +217,13 @@ if (get("spawn_veil")?.extra) {
   const e = get("spawn_veil").extra;
   check(`spawn_veil: the pad heard (+${e.pad} dB at 200-700 Hz), silent under the veil (${e.veiled} LUFS ≤ -55), the hatch bell rings (+${e.hatch} dB on a phone)`, e.pad >= 1.5 && e.veiled <= -55 && e.hatch >= 6);
 }
+// Weather: the flash cracks, the thunder still rolls, a storm swells up and brightens.
+if (get("lightning_near")) check(`lightning_near ≥ +8 dB at the flash: ${get("lightning_near").dFull}`, get("lightning_near").dFull >= 8);
+if (get("thunder_near")) check(`thunder_near ≥ +6 dB (full band): ${get("thunder_near").dFull}`, get("thunder_near").dFull >= 6);
+if (get("storm_swell")?.extra) {
+  const e = get("storm_swell").extra;
+  check(`storm_swell: +2..+6 dB (Δ400ms ${e.d400}), brightening (${Math.round(e.early)} → ${Math.round(e.late)} Hz)`, e.d400 >= 2 && e.d400 <= 6 && e.late > e.early);
+}
 // Nothing clips: the limiter holds every scene's peaks under full scale.
 const peaky = results.filter((r) => r.peak > -1);
 check(`every scene's peak ≤ -1 dBFS: ${peaky.length ? peaky.map((r) => `${r.name} ${r.peak}`).join(", ") : `loudest ${Math.max(...results.map((r) => r.peak))}`}`, !peaky.length);

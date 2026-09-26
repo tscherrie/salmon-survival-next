@@ -216,6 +216,8 @@
     shot("reel", (s) => s.reel()),
     shot("snap", (s) => s.snap()),
     shot("thunder_near", (s) => s.thunder(1)),
+    shot("lightning_near", (s) => s.lightning?.(1)),
+    { ...shot("storm_swell", (s) => s.storm?.()), seconds: 12, measure: (m) => ({ d400: m.loudest(4, 11.5, 0.4) - m.loudest(2.5, 4, 0.4), early: m.spectrum(4.5, 6).centroid, late: m.spectrum(6.5, 7.9).centroid }) },
     shot("thunder_far", (s) => s.thunder(0.1)),
     shot("eaten_fish", (s) => s.eaten("fish")),
     shot("eaten_bird", (s) => s.eaten("bird")),

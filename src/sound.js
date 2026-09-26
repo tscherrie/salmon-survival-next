@@ -98,6 +98,8 @@ const MIX = {
   hatch: 0.35,
   pad: 0.05,
   ending: 0.6,
+  storm: 0.5,
+  crack: 0.7,
 };
 // The leap's sweet spot (main.js: a leap released above this on the swing clears the fall).
 const SWEET = 0.82;
@@ -414,7 +416,7 @@ export function createSound() {
       // Moved only when the ear crosses the surface, at the pace of the crossing.
       crossing: { pingsUnder: pingsUnder.gain, waterDuck: waterDuck.gain, dry: dry.gain, wet: wet.gain, airOpen: airOpen.gain, surface: surface.gain, air: air.gain },
     };
-    for (const name of ["gravel", "clatter", "chirp", "bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear", "fanfare", "chime-bronze", "chime-silver", "chime-gold", "victory", "growth", "hatch"]) bank(name);
+    for (const name of ["gravel", "clatter", "chirp", "bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear", "fanfare", "chime-bronze", "chime-silver", "chime-gold", "victory", "growth", "hatch", "crack"]) bank(name);
     bank("white");
     bank("brown");
     return true;
@@ -788,12 +790,11 @@ export function createSound() {
       o.stop(at + 3.1);
       voice(o, hum);
     },
-    // Thunder: when it is close a crack first, then the rumble rolling away in a few
-    // swells. Under water the crack is dulled and the rumble comes through. `near` 0..1.
-    thunder(near = 0.5) {
+    // Thunder: the rumble rolling away in a few swells (the crack comes with the flash, see
+    // lightning()). Under water it comes through dulled. `near` 0..1; `delay` s from now.
+    thunder(near = 0.5, delay = 0) {
       if (!ready()) return;
-      const at = context.currentTime + 0.02;
-      if (near > 0.6) click(at, 1.2 * near, 2400, 0.06, nodes.air);
+      const at = context.currentTime + 0.02 + delay;
       const source = bufferSource(bank("brown")[0]);
       const low = filter("lowpass", 200 + 500 * near, 0.6);
       const env = amp(0);
@@ -807,6 +808,32 @@ export function createSound() {
       source.start(at, Math.random() * 3);
       source.stop(at + length + 0.1);
       voice(source, env);
+    },
+    // A storm coming up: the wind and the rain on the way swelling for five seconds, rushing
+    // brighter, and the first thunder far off.
+    storm() {
+      if (!ready() || !coolOk("storm", 30)) return;
+      const at = context.currentTime + 0.05;
+      const source = bufferSource(bank("white")[0]);
+      source.loop = true;
+      const tone = filter("lowpass", 150, 0.6);
+      const swell = amp(0);
+      tone.frequency.setValueAtTime(150, at);
+      tone.frequency.exponentialRampToValueAtTime(700, at + 5);
+      swell.gain.setValueAtTime(0, at);
+      swell.gain.linearRampToValueAtTime(MIX.storm, at + 5);
+      swell.gain.linearRampToValueAtTime(0, at + 7);
+      source.connect(tone).connect(swell).connect(nodes.air);
+      source.start(at, Math.random() * 3);
+      source.stop(at + 7.1);
+      voice(source, swell);
+      this.thunder(0.15, 4);
+    },
+    // The flash: when it strikes near (`near` 0..1), a hard crack at once, the air tearing.
+    lightning(near = 0.5) {
+      if (!ready() || near <= 0.5) return;
+      // (Under water dulled, and played louder by about what the surface takes from it.)
+      play(pick(bank("crack")), nodes.air, MIX.crack * near * (1 + 5 * submerged), undefined, random(0.9, 1.1));
     },
     // Otters at play: quick, high chirps and squeaks.
     otter() {
