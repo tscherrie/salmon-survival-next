@@ -1130,12 +1130,15 @@ function createHunters(scene, { detail }) {
     threats(fish, out = []) {
       out.length = 0;
       predators.threats(fish, out);
-      if (bird.mode === "hover") out.push({ position: kingfisher.position, level: bird.t > 0.8 ? 1 : 0.8, coiled: bird.t > 0.8, kind: "kingfisher", title: "Eisvogel", above: true, key: bird });
+      // (`coil`: how long until the strike lands -- the kingfisher dives at 1.3 s, the heron's
+      // bill is in the water 0.3 s into its strike, the bear's paw comes down a second after
+      // it goes up.)
+      if (bird.mode === "hover") out.push({ position: kingfisher.position, level: bird.t > 0.8 ? 1 : 0.8, coiled: bird.t > 0.8, coil: 1.3 - bird.t, kind: "kingfisher", title: "Eisvogel", above: true, key: bird });
       if (heron.mode === "stand" || heron.mode === "strike") {
         const d = Math.hypot(fish.position.x - heron.position.x, fish.position.z - heron.position.z);
-        if (d < 14) out.push({ position: heron.position, level: heron.mode === "strike" ? 1 : d < 7 ? 0.8 : 0.5, coiled: heron.mode === "strike", kind: "heron", title: "Graureiher", key: heron });
+        if (d < 14) out.push({ position: heron.position, level: heron.mode === "strike" ? 1 : d < 7 ? 0.8 : 0.5, coiled: heron.mode === "strike", coil: 0.3 - (heron.strike ?? 0), kind: "heron", title: "Graureiher", key: heron });
       }
-      if (bear.active && bear.position.distanceTo(fish.position) < 26) out.push({ position: bear.paw, level: bear.striking ? 1 : 0.6, coiled: !!bear.striking, kind: "bear", title: "Braunbär", key: bear });
+      if (bear.active && bear.position.distanceTo(fish.position) < 26) out.push({ position: bear.paw, level: bear.striking ? 1 : 0.6, coiled: !!bear.striking, coil: bear.coil ?? 0, kind: "bear", title: "Braunbär", key: bear });
       return out;
     },
     reset(fish) {
@@ -1212,7 +1215,7 @@ function createHunters(scene, { detail }) {
           if (bird.to.distanceTo(fish.position) < 0.45 + L * 0.35 && !covered && !captive.active && !fish.safe) {
             result.killed = "Vom Eisvogel erwischt";
             seize("bird");
-          }
+          } else (result.whiffs ??= []).push({ key: bird, kind: "kingfisher" });
         }
         if (captive.kind === "bird" && captive.active) {
           // Held crosswise in the bill, carried up and away.
@@ -1271,7 +1274,7 @@ function createHunters(scene, { detail }) {
                 result.bitten = true;
                 fish.energy = Math.max(0, fish.energy - 0.25);
               }
-            }
+            } else (result.whiffs ??= []).push({ key: heron, kind: "heron" });
           }
           if (heron.strike > 1.2) {
             heron.mode = "stand";
@@ -1352,6 +1355,7 @@ function createHunters(scene, { detail }) {
         else bear.paw.lerpVectors(rest, raised, Math.sin(up * Math.PI * 0.5)).add(forward.set(Math.sin(bear.swipe * 40) * 0.15 * up, 0, 0));
         bearPaw.position.copy(bear.paw);
         bear.striking = bear.swipe > 0 && bear.swipe < WIND + STRIKE;
+        bear.coil = WIND + STRIKE - bear.swipe;
         if (bear.swipe > WIND && t >= 1 && !bear.checked) {
           bear.checked = true;
           result.splash = { x: bear.target.x, y: lv, z: bear.target.z, strength: 1.4 };

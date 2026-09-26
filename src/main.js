@@ -1633,7 +1633,7 @@ async function start() {
     }
     // And by ear: a swell where one notices the fish, pulses from the one hunting it, a
     // quickening tick before a strike (the heart beats then as well).
-    sound.warn(list, dead <= 0 && !fish.captive);
+    sound.warn(list);
   }
   let veiled = false;
   let deadHushed = false;
@@ -1957,8 +1957,9 @@ async function start() {
         // Past a fall on the way home, this is where it starts again if it dies.
         if (STAGES[fish.stage].fasting) checkpoint = snapshotCheckpoint();
       } else if (e.type === "leapFailed") {
-        // Fell short, back into the pool below.
-        sound.leapResult("failed");
+        // Fell short, back into the pool below. (At a step of the cascade, as with clearing
+        // one, only the splash says it: the young fish try them again and again.)
+        if (!e.fall.step) sound.leapResult("failed");
       } else if (e.type === "lunge") {
         // A burst: the whump of it, and bubbles behind (unless it is a leap: the breach).
         sound.dash(L, !fish.events.some((x) => x.type === "leap"));
@@ -2093,6 +2094,8 @@ async function start() {
     }
     for (const e of outcome.rivals ?? []) if (e.type === "nip" || e.type === "hit" || e.type === "lost") lastCombat = time;
     for (let i = 0; i < (outcome.missed ?? 0); i++) if (dead <= 0) brood.escaped();
+    // A strike that missed: heard snapping shut on nothing.
+    for (const w of outcome.whiffs ?? []) if (dead <= 0 && !fish.captive) sound.whiff(w.key, w.kind);
     // (vegan mode: nobody dies of anything)
     if (outcome.killed && dead <= 0 && !mode.vegan) die(outcome.killed);
     else if (fish.energy <= 0 && dead <= 0 && time - lastCombat < 6 && !mode.vegan) die("Im Kampf unterlegen");

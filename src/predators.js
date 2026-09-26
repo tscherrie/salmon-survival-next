@@ -365,7 +365,7 @@ export function createPredators(scene, { random, seize, captive }) {
         else if (h.mode === "stalk" || h.mode === "raid" || (h.mode === "lurk" && h.perceived > 0)) level = 0.6;
         else if (h.mode === "notice") level = 0.4;
         if (!level) continue;
-        out.push({ position: h.position, level, coiled: h.mode === "strike" && clock < (h.coilUntil ?? 0), kind: h.kind, title: TITLES[h.kind] ?? h.spec.title, key: h });
+        out.push({ position: h.position, level, coiled: h.mode === "strike" && clock < (h.coilUntil ?? 0), coil: (h.coilUntil ?? 0) - clock, kind: h.kind, title: TITLES[h.kind] ?? h.spec.title, key: h });
       }
       return out;
     },
@@ -712,8 +712,10 @@ export function createPredators(scene, { random, seize, captive }) {
             } else if (time > h.until) {
               h.mode = "recover";
               h.until = time + (spec.tactic === "ambush" ? 1.5 : 1.1);
-              // A strike that missed: the salmon got away (counted on its life card).
+              // A strike that missed: the salmon got away (counted on its life card), and its
+              // jaws are heard shutting on nothing.
               if (hunts && !fish.captive) result.missed = (result.missed ?? 0) + 1;
+              if (!fish.captive) (result.whiffs ??= []).push({ key: h, kind: h.kind });
             }
             break;
           }
