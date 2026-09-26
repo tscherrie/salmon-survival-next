@@ -25,6 +25,7 @@
 // source and a level each, instead of a tangle of oscillators and filters every time.
 
 import { RATE, random, pick, makeBurst, KNOCKS, makeBlup, makeSplash, makeSwallow, createWorkshop, makeAll, step, stepSize } from "./sound-make.js";
+import { makeCues } from "./sound-cues.js";
 
 const STORAGE_KEY = "habitat-sound";
 // The master level, with sound on and nothing hushing it.
@@ -69,7 +70,19 @@ const MIX = {
   call: 0.32,
   otter: 0.38,
   thunder: 2.2,
+  whump: 0.4,
+  trail: 0.7,
+  jaws: 0.75,
+  denied: 0.55,
+  thud: 0.6,
+  gasp: 0.25,
+  gills: 0.09,
+  charge: 1.0,
+  tick: 0.6,
+  cleared: 0.1,
 };
+// The leap's sweet spot (main.js: a leap released above this on the swing clears the fall).
+const SWEET = 0.82;
 
 export function createSound() {
   let enabled = true;
@@ -91,6 +104,11 @@ export function createSound() {
     submerged = 1,
     crossing = NaN,
     clearTone = 7000,
+    // The leap's charge: its tone while the meter swings, and where the swing last was.
+    chargeTone = null,
+    chargeLevel = null,
+    chargeAt = 0,
+    chargeWritten = -1,
     // The voices sounding now (one-shots of any kind), the most at once, the nodes made
     // since the start and the bytes of sample memory held (for stats and the checks).
     live = 0,
@@ -107,6 +125,7 @@ export function createSound() {
   const sized = new Map();
   const workshop = createWorkshop();
   workshop.add(makeAll(raw));
+  workshop.add(makeCues(raw));
 
   // (`rate` lower for the deep sounds, which need no more: half the memory at 24 kHz.)
   const toBuffer = (channels, rate = RATE) => {
@@ -239,9 +258,11 @@ export function createSound() {
     const wet = amp(1);
     through.connect(dim);
     dimTop.connect(wet).connect(world);
-    // The fish's own body: the same in the water and out of it.
+    // The fish's own body: the same in the water and out of it; its gills while it is winded.
     const body = amp(1);
     body.connect(world);
+    const gillsGain = amp(0);
+    loop(bank("gills")[0]).connect(gillsGain).connect(body);
     const ui = amp(MIX.ui);
     ui.connect(master);
 
@@ -329,11 +350,12 @@ export function createSound() {
         rain: knob(rainGain.gain),
         rainUnder: knob(rainUnderGain.gain),
         waterTone: knob(waterTone.frequency, 0.015, 1),
+        gills: knob(gillsGain.gain),
       },
       // Moved only when the ear crosses the surface, at the pace of the crossing.
       crossing: { waterDuck: waterDuck.gain, dry: dry.gain, wet: wet.gain, airOpen: airOpen.gain, surface: surface.gain, air: air.gain },
     };
-    for (const name of ["bubble", ...KNOCKS, "nip", "breach", "rise", "reel"]) bank(name);
+    for (const name of ["bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared"]) bank(name);
     bank("white");
     bank("brown");
     return true;
@@ -753,6 +775,73 @@ export function createSound() {
       if (!ready()) return;
       play(pick(bank("nip")), nodes.water, MIX.nip, undefined, random(0.92, 1.08));
     },
+    // A burst of speed (Space): the water shoved aside, a soft whump gliding down, and a trail
+    // of bubbles behind (`trail` false when the burst is a leap: the breach says it).
+    dash(size = 1, trail = true) {
+      if (!ready() || !coolOk("dash", 0.25)) return;
+      const at = context.currentTime + 0.01;
+      play(pick(bank("whump")), nodes.water, MIX.whump, at, random(0.93, 1.07) / (1 + 0.12 * size));
+      if (trail) bubbles(6, 0.35, 1 / (1 + 0.2 * size), MIX.trail, at + 0.03);
+    },
+    // The fish's jaws snapping shut on something (or on nothing): `k` 1 for a strike with
+    // Space, less for the small dart it makes by itself.
+    jaws(size = 1, k = 1) {
+      if (!ready() || !coolOk("jaws", 0.12)) return;
+      play(pick(bank("jaws")), nodes.body, MIX.jaws * k, undefined, random(0.93, 1.07) / (1 + 0.1 * size));
+    },
+    // Space with no breath left: a dull thud, the burst refused.
+    denied() {
+      if (!ready() || !coolOk("denied", 0.5)) return;
+      play(pick(bank("denied")), nodes.body, MIX.denied, undefined, random(0.95, 1.05));
+    },
+    // Out of breath: a gasp (the gills keep working while it lasts, see update()).
+    winded() {
+      if (!ready() || !coolOk("gasp", 3)) return;
+      play(pick(bank("gasp")), nodes.body, MIX.gasp, undefined, random(0.9, 1.1));
+    },
+    // The leap's charge at the Lachsfall: a tone rising with the meter's swing `v` (0..1),
+    // a tick as it passes the sweet spot. charge(-1) stops it; charge(v, true) lets the
+    // leap go, with a louder tick if it went at the sweet spot.
+    charge(v, release = false) {
+      if (!context || !nodes) return;
+      const now = context.currentTime;
+      if (v < 0 || release) {
+        if (release && v > SWEET && ready()) play(pick(bank("tick")), nodes.body, MIX.tick * 1.8);
+        if (chargeTone) {
+          chargeLevel.gain.cancelScheduledValues(now);
+          chargeLevel.gain.setTargetAtTime(0, now, 0.02);
+          chargeTone.stop(now + 0.12);
+          chargeTone = chargeLevel = null;
+        }
+        chargeAt = 0;
+        chargeWritten = -1;
+        return;
+      }
+      if (!ready()) return;
+      if (!chargeTone) {
+        chargeTone = oscillator("triangle");
+        chargeLevel = amp(0);
+        chargeTone.connect(chargeLevel).connect(nodes.body);
+        chargeTone.frequency.value = 260 + 640 * v;
+        chargeTone.start(now);
+        voice(chargeTone, chargeLevel);
+      }
+      // (Written only when it has moved: the swing takes 1.2 s, so about 20 times a second.)
+      if (Math.abs(v - chargeWritten) > 0.03) {
+        chargeWritten = v;
+        chargeTone.frequency.setTargetAtTime(260 + 640 * v, now, 0.02);
+        chargeLevel.gain.setTargetAtTime(MIX.charge * (0.08 + 0.08 * v), now, 0.03);
+      }
+      if (v > SWEET && chargeAt <= SWEET) play(pick(bank("tick")), nodes.body, MIX.tick);
+      chargeAt = v;
+    },
+    // How a leap at a fall ended: "cleared" (three quick bells up) or "failed" (a heavy thud
+    // back into the pool).
+    leapResult(kind) {
+      if (!ready()) return;
+      if (kind === "cleared") play(bank("cleared")[0], nodes.ui, MIX.cleared, undefined, random(0.99, 1.01));
+      else play(pick(bank("thud")), nodes.body, MIX.thud, undefined, random(0.95, 1.05));
+    },
     // Another fish taking a fly off the surface somewhere near: a soft sip and a bubble,
     // fainter the further off.
     rise(distance = 5) {
@@ -827,6 +916,8 @@ export function createSound() {
       steer(k.air, MIX.air * (0.8 + 0.2 * swell) * (1 + 0.6 * roar + 0.8 * rain), now, 0.4);
       steer(k.rain, MIX.rain * rain, now, 1.2);
       steer(k.rainUnder, MIX.rainUnder * rain, now, 1.2);
+      // The gills working while winded, harder the less breath there is.
+      steer(k.gills, winded ? MIX.gills * Math.min(1, Math.max(0.2, 1 - breath / 0.45)) : 0, now, 0.3);
       clearTone = 7000 * (1 - 0.3 * night) * (1 - 0.45 * Math.min(1, depth / 40));
       steer(k.waterTone, waterTone(), now, 0.4);
     },

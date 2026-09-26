@@ -421,6 +421,8 @@ async function start() {
       closeQuality();
     }
     sound.hush(value || logbook.open, "pause");
+    // (The leap's charge tone stops with the swim; the meter starts afresh after.)
+    if (value) sound.charge(-1);
     held.clear();
     if (!value) last = performance.now();
   }
@@ -725,6 +727,7 @@ async function start() {
     const v = swing(charge.t);
     charge = null;
     meter.hidden = true;
+    sound.charge(v, true);
     // Only a leap near the top of the swing clears it (with a run at it and strength left);
     // "almost" falls back into the pool.
     leapPower = v > 0.82 ? 1.14 : 0.6 + 0.4 * v;
@@ -736,10 +739,13 @@ async function start() {
     if (!inLeapReach()) {
       charge = null;
       meter.hidden = true;
+      sound.charge(-1);
       return;
     }
     charge.t += dt;
     const v = swing(charge.t);
+    // Its tone rises and falls with the meter.
+    sound.charge(v);
     meterFill.style.transform = `scaleY(${v.toFixed(3)})`;
     meter.classList.toggle("sweet", v > 0.82);
   }
@@ -1904,13 +1910,29 @@ async function start() {
         falls.splash(fish.position.x, level(fish.river.s), fish.position.z, L);
         ripples.add(fish.position.x, fish.position.z, 1.2);
       } else if (e.type === "leapDone") {
-        if (!e.fall.step) hud.toast(e.fall.name, "geschafft");
+        if (!e.fall.step) {
+          hud.toast(e.fall.name, "geschafft");
+          sound.leapResult("cleared");
+        }
         // Past a fall on the way home, this is where it starts again if it dies.
         if (STAGES[fish.stage].fasting) checkpoint = snapshotCheckpoint();
+      } else if (e.type === "leapFailed") {
+        // Fell short, back into the pool below.
+        sound.leapResult("failed");
+      } else if (e.type === "lunge") {
+        // A burst: the whump of it, and bubbles behind (unless it is a leap: the breach).
+        sound.dash(L, !fish.events.some((x) => x.type === "leap"));
+      } else if (e.type === "strike") {
+        sound.jaws(L, e.auto ? 0.5 : 1);
+      } else if (e.type === "snap") {
+        // A spawner snapping from habit.
+        sound.jaws(L, 0.6);
       } else if (e.type === "noBreath") {
         hud.short();
+        sound.denied();
       } else if (e.type === "winded") {
         windedOnce = true;
+        sound.winded();
       } else if (e.type === "knock") {
         fish.energy = Math.max(0, fish.energy - e.strength);
         shake = 0.8;
@@ -2194,6 +2216,7 @@ async function start() {
     deathInfo = { cause, stageName: STAGES[fish.stage].name, stageId: STAGES[fish.stage].id, progress: fish.progress, region: regionName(fish.river.s), month: MONTHS[conditions.month] };
     const held = life.hunters.captive;
     if (held.active) sound.eaten(held.kind);
+    sound.charge(-1);
     hud.toast(cause, "", 3);
     endDrive("died");
     endBall(true);

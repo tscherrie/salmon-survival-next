@@ -71,6 +71,24 @@ export function ring(data, at, frequency, tau, amp, sag = 1) {
     data[start + i] += amp * Math.min(1, t / 0.0015) * Math.exp(-t / tau) * Math.sin(phase);
   }
 }
+// Adds a tone that glides from `from` towards `to` (Hz, closing in with time constant
+// `glide`), rising in `attack` and dying away with `tau`.
+export function tone(data, at, from, to, glide, tau, amp, attack = 0.002) {
+  const start = Math.floor(at * RATE);
+  const n = Math.min(data.length - start, Math.ceil((attack + tau * 7) * RATE));
+  let phase = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / RATE;
+    phase += (2 * Math.PI * (to + (from - to) * Math.exp(-t / glide))) / RATE;
+    data[start + i] += amp * (t < attack ? t / attack : Math.exp(-(t - attack) / tau)) * Math.sin(phase);
+  }
+}
+// The last `seconds` of a sound faded out, so that nothing stops on a click.
+export function fadeOut(data, seconds = 0.03) {
+  const n = Math.min(data.length, Math.floor(seconds * RATE));
+  for (let i = 0; i < n; i++) data[data.length - n + i] *= 1 - i / n;
+  return data;
+}
 // Adds noise in a band that rises in `attack` and dies away with `tau`; the band can sweep
 // from `frequency` to `to` over `sweep` seconds.
 export function hiss(data, at, type, frequency, q, tau, amp, attack = 0.001, to = frequency, sweep = 0) {

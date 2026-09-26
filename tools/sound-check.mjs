@@ -141,6 +141,16 @@ for (const name of ["thump_body", "thump_rock", "thump_wood", "thump_net", "thum
 const splashes = ["solo_splash_L0.3", "solo_splash_L1", "solo_splash_L3", "solo_splash_L5.5"].map(get);
 if (splashes.every(Boolean)) check(`splash centroid falls with size: ${splashes.map((r) => r.centroid).join(" > ")}`, splashes.every((r, i) => i === 0 || r.centroid < splashes[i - 1].centroid));
 for (const r of byKind("cross")) if (r.name !== "leap_whole") check(`${r.name}: in the air within 4 dB (${(r.above - r.under).toFixed(1)}), no jump over 4 dB (${r.jump})`, Math.abs(r.above - r.under) <= 4 && r.jump <= 4);
+// What the fish does: heard on a phone over the bed.
+for (const [name, least] of [["dash", 6], ["jaws", 6], ["fall_cleared", 6], ["denied", 4]]) if (get(name)) check(`${name} ≥ +${least} dB over the bed on a phone: ${get(name).dPhone}`, get(name).dPhone >= least);
+if (get("charge")?.extra) {
+  const e = get("charge").extra;
+  check(`charge: a tone low at the start of the swing (+${e.low} dB at 240-420 Hz) and high at its top (+${e.high} dB at 700-1000 Hz), the sweet spot ticked (${e.ticks} ticks)`, e.low >= 2 && e.high >= 4 && e.ticks >= 1);
+}
+if (get("bed_winded")?.extra && get("bed_river")?.extra) {
+  const d = get("bed_winded").extra.gills - get("bed_river").extra.gills;
+  check(`bed_winded: the gills +1..+3.5 dB at 500-1500 Hz over bed_river: ${d.toFixed(1)}`, d >= 1 && d <= 3.5);
+}
 // Nothing clips: the limiter holds every scene's peaks under full scale.
 const peaky = results.filter((r) => r.peak > -1);
 check(`every scene's peak ≤ -1 dBFS: ${peaky.length ? peaky.map((r) => `${r.name} ${r.peak}`).join(", ") : `loudest ${Math.max(...results.map((r) => r.peak))}`}`, !peaky.length);
