@@ -95,31 +95,14 @@ export class GeometryBatch {
   }
 }
 
-// Rounded limestone: a sphere cut back by soft planes, weathered by noise, with shallow
-// solution pits and faint bedding. `round` pulls the cut planes out so the stone is
-// water-worn rather than angular.
+// Rounded limestone: a sphere cut back by soft planes, weathered by noise, with faint
+// bedding. `round` pulls the cut planes out so the stone is water-worn rather than angular.
 export function rockGeometry(seed, detail = 96, round = 1) {
   const geometry = new THREE.SphereGeometry(1, detail, Math.floor(detail * 0.7));
   const positions = geometry.attributes.position;
   const color = new THREE.Color();
   const colors = [];
   const planes = [];
-  const sample = randomGenerator(Math.round(seed * 1000) + 27461);
-  const pits = [];
-  if (detail > 20)
-    for (let i = 0; i < 60; i++) {
-      const y = sample() * 2 - 1,
-        a = sample() * Math.PI * 2,
-        r = Math.sqrt(1 - y * y);
-      const radius = 0.03 + sample() ** 2 * 0.14;
-      pits.push({
-        x: Math.cos(a) * r,
-        y,
-        z: Math.sin(a) * r,
-        radius,
-        depth: radius * (0.15 + sample() * 0.4),
-      });
-    }
   for (let i = 0; i < 11; i++) {
     const a = i * 2.399963 + seed,
       y = 1 - (2 * (i + 0.5)) / 11,
@@ -146,22 +129,26 @@ export function rockGeometry(seed, detail = 96, round = 1) {
     let radius = Math.min(1.3, Math.pow(1 + inverse, -1 / (6 + 4 * (1 - round))) * 1.15);
     radius +=
       (a - 0.5) * 0.12 + (b - 0.5) * 0.04 + (c - 0.5) * 0.012 - strata * 0.012;
-    let depression = 0;
-    for (const pit of pits) {
-      const d =
-        Math.sqrt((x - pit.x) ** 2 + ((y - pit.y) * 1.1) ** 2 + (z - pit.z) ** 2) /
-        pit.radius;
-      if (d < 1) depression += pit.depth * (1 - d * d) ** 0.8;
-    }
-    radius -= Math.min(0.12, depression);
     positions.setXYZ(i, x * radius, y * radius, z * radius);
-    color
-      .setRGB(1, 0.985, 0.955)
-      .multiplyScalar((0.82 + 0.2 * a) * (1 - Math.min(0.4, depression * 2.6)) * (1 - strata * 0.08));
+    color.setRGB(1, 0.985, 0.955).multiplyScalar((0.82 + 0.2 * a) * (1 - strata * 0.08));
     colors.push(color.r, color.g, color.b);
   }
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
+  // The sphere's seam and its poles are drawn more than once at one place; their normals
+  // are joined, or every stone shows a crease down one flank and a pinch on its crown.
+  const normal = geometry.attributes.normal;
+  const at = (i) => `${positions.getX(i).toFixed(4)} ${positions.getY(i).toFixed(4)} ${positions.getZ(i).toFixed(4)}`;
+  const joined = new Map();
+  for (let i = 0; i < positions.count; i++) {
+    const key = at(i);
+    if (!joined.has(key)) joined.set(key, new THREE.Vector3());
+    joined.get(key).add(new THREE.Vector3().fromBufferAttribute(normal, i));
+  }
+  for (let i = 0; i < positions.count; i++) {
+    const n = joined.get(at(i)).clone().normalize();
+    normal.setXYZ(i, n.x, n.y, n.z);
+  }
   return geometry;
 }
 

@@ -484,7 +484,17 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
     {
       const want = Math.floor((area / 1000) * (r.brook * 70 + r.upper * 45 + r.middle * 18 + r.lower * 3 + r.sea * 4 + r.estuary * 2));
       if (want > 0) {
-        const mesh = new THREE.InstancedMesh(cobble, rocks[kind], want);
+        // (Each cobble's brightness and share of moss in an attribute of its own, on a
+        // geometry sharing the cobble's shape: rocks.cobbles.)
+        const tone = new THREE.InstancedBufferAttribute(new Float32Array(want * 3), 3);
+        const geometry = new THREE.BufferGeometry();
+        for (const [name, attribute] of Object.entries(cobble.attributes)) geometry.setAttribute(name, attribute);
+        geometry.setIndex(cobble.index);
+        geometry.setAttribute("cobbleTone", tone);
+        // (Not disposed with the block: that would free the shape's buffers the other
+        // blocks still draw from.)
+        geometry.userData.sharesCobble = true;
+        const mesh = new THREE.InstancedMesh(geometry, rocks.cobbles[kind], want);
         const object = new THREE.Object3D();
         const color = new THREE.Color();
         let used = 0;
@@ -505,7 +515,7 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
           // The bigger cobbles in the brook and upper river carry a tuft of moss.
           if (size > 0.45 && p.depth > 0.4 && random() < moss * 0.45) tops.push({ x: p.x, y: object.position.y + sy * 0.8, z: p.z, cy: object.position.y, r: Math.min(sx, sz), ry: sy, s: p.s, level: p.level, small: true });
           color.setRGB(range(0.65, 1.15), moss * range(0.3, 1), 1);
-          mesh.setColorAt(used, color);
+          tone.setXYZ(used, color.r, color.g, color.b);
           used++;
         }
         mesh.count = used;
@@ -952,7 +962,7 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
       });
     }
   }
-  const isShared = (geometry) => geometry === cobble || shapes.large.includes(geometry) || shapes.small.includes(geometry);
+  const isShared = (geometry) => geometry === cobble || geometry.userData.sharesCobble || shapes.large.includes(geometry) || shapes.small.includes(geometry);
 
   // The cell size a block should be built at, from its distance to the viewer.
   function cellFor(distance, size, near) {

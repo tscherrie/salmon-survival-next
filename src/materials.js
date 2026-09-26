@@ -32,6 +32,7 @@ import {
   modelWorldMatrix,
   normalGeometry,
   normalize,
+  normalWorldGeometry,
   perspectiveDepthToViewZ,
   positionLocal,
   positionView,
@@ -1163,20 +1164,23 @@ export async function createRockMaterials() {
     load("pine_bark_diff", true),
     load("pine_bark_nor_gl", false),
   ]);
-  const make = (map, normalMap, { scale, grey, moss }) => {
+  // cobbles: the small stones strewn over the gravel, one instanced mesh a block, each with
+  // its own brightness and share of moss in an attribute of its own (cobbleTone) -- not the
+  // instance colour, which the renderer would also lay over the stone's colour.
+  const make = (map, normalMap, { scale, grey, moss, cobbles = false }) => {
     // (The vertex colours are read by the colour node itself: not multiplied in again.)
     const material = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.85 });
     const rockNormal = property("vec3", "rockNormal");
-    const geometryNormal = varying(normalize(modelWorldMatrix.mul(vec4(normalGeometry, 0)).xyz));
     material.colorNode = Fn(() => {
       const P = positionWorld;
-      const Nw = normalize(geometryNormal);
+      // (The normal as the geometry has it, each instance turned and squashed its own way.)
+      const Nw = normalWorldGeometry;
       const rock = triplanar(map, normalMap, P, Nw, 1 / scale);
       const c = mix(vec3(dot(rock.color, vec3(0.3, 0.55, 0.15))), rock.color, 1 - grey);
       rockNormal.assign(normalize(mix(Nw, rock.normal, 0.8)));
       // Moss and algae on the side facing the light.
       const n = noise3(P.mul(1.3)).mul(0.6).add(noise3(P.mul(4.1)).mul(0.4));
-      const vColor = vertexColor();
+      const vColor = cobbles ? vertexColor().mul(vec4(attribute("cobbleTone", "vec3"), 1)) : vertexColor();
       const cap = smoothstep(0.1, 0.75, Nw.y.add(n.sub(0.5).mul(0.7))).mul(moss).mul(vColor.g);
       const growth = mix(vec3(0.05, 0.085, 0.025), vec3(0.14, 0.17, 0.06), noise3(P.mul(11)));
       return vec4(mix(c.mul(vColor.r), growth, cap.mul(0.9)), 1);
@@ -1185,16 +1189,26 @@ export async function createRockMaterials() {
     waterLit(material);
     return material;
   };
-  return {
+  // (Each photograph laid on at about the size of the surface it shows, a few metres
+  // across: larger, its lichen turns to camouflage blotches and its cracks to painted lines.)
+  const kinds = {
     // Brook and upper river: lichen-grey stone under a coat of moss.
-    brook: make(mossy, mossyNormal, { scale: 16, grey: 0.25, moss: 0.9 }),
+    brook: [mossy, mossyNormal, { scale: 5, grey: 0.25, moss: 0.9 }],
     // The big river and the falls: bare grey gneiss with a film.
-    river: make(face, faceNormal, { scale: 22, grey: 0.6, moss: 0.35 }),
+    river: [face, faceNormal, { scale: 6, grey: 0.6, moss: 0.35 }],
     // The sea: dark, barnacled, with red and brown algae.
-    sea: make(sea, seaNormal, { scale: 14, grey: 0.2, moss: 0.25 }),
+    sea: [sea, seaNormal, { scale: 4.5, grey: 0.2, moss: 0.25 }],
+  };
+  const set = {
     // Drowned trunks and roots.
     wood: make(bark, barkNormal, { scale: 9, grey: 0.1, moss: 0.5 }),
+    cobbles: {},
   };
+  for (const [kind, [map, normalMap, options]] of Object.entries(kinds)) {
+    set[kind] = make(map, normalMap, options);
+    set.cobbles[kind] = make(map, normalMap, { ...options, cobbles: true });
+  }
+  return set;
 }
 
 export { frontFacing };

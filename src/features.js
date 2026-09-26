@@ -32,7 +32,7 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import { relaid, COLD_SPRINGS, CRACKS, FALLS, ISLANDS, KING_POOL, MILLS, S, TRIBUTARIES, UNDERCUTS, bed, frame, level, place, section, smooth } from "./course.js";
+import { relaid, COLD_SPRINGS, CRACKS, FALLS, ISLANDS, KING_POOL, MILLS, S, TRIBUTARIES, UNDERCUTS, bed, frame, level, place, regionWeights, section, smooth } from "./course.js";
 import { MODEL_LENGTH, createFishMesh } from "./anatomy.js";
 import { SolidBatch, bankGrass, fallenLeaf, hangingMoss, leafSpray, mossTuft, reeds, sedge, turfTuft } from "./flora.js";
 import { TreeBatch, alder, birch, fallenTrunk, fern, forestMaterial, roots, shrub, willow } from "./forest.js";
@@ -1965,7 +1965,11 @@ export function createFeatures(scene, { rocks, locate, surfaceMaterial = null })
     if (!ctx.stones.empty) {
       const g = ctx.stones.geometry();
       g.computeBoundingSphere();
-      const mesh = new THREE.Mesh(g, rocks.brook ?? rocks.river);
+      // The river's own stone there (terrain.js): mossy in the brook, bare gneiss in the
+      // big river, dark and barnacled by the sea.
+      const r = regionWeights(Math.min(feature.s, S.coast));
+      const kind = r.sea + r.estuary * 0.5 > 0.5 ? "sea" : r.brook + r.upper > 0.5 ? "brook" : "river";
+      const mesh = new THREE.Mesh(g, rocks[kind]);
       mesh.castShadow = mesh.receiveShadow = true;
       mesh.name = "Stones";
       group.add(mesh);
