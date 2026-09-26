@@ -1036,15 +1036,24 @@ const skinNoise = (p) => {
 };
 // Round spots scattered on a jittered grid: (spot, halo).
 const spots = (p, density, size, seed) => {
-  const cell = floor(p);
+  // (What all nine cells share is worked out first, outside their branches: an expression
+  // first used inside one cell's branch is computed there only, and the other cells would
+  // divide by nothing -- whole spots went missing.)
+  const at = vec2(0).toVar(),
+    radius = float(0).toVar(),
+    share = float(0).toVar();
+  at.assign(p);
+  radius.assign(size);
+  share.assign(density);
+  const cell = floor(at);
   const best = vec2(0).toVar();
   for (let j = -1; j <= 1; j++)
     for (let i = -1; i <= 1; i++) {
       const c = cell.add(vec2(i, j));
-      If(skinHash(c.add(seed)).lessThanEqual(density), () => {
+      If(skinHash(c.add(seed)).lessThanEqual(share), () => {
         const centre = c.add(0.2).add(vec2(skinHash(c.mul(1.3).add(seed + 1)), skinHash(c.mul(1.7).add(seed + 2))).mul(0.6));
-        const r = float(size).mul(skinHash(c.add(seed + 3)).mul(0.45).add(0.55));
-        const d = p.sub(centre).length().div(r);
+        const r = radius.mul(skinHash(c.add(seed + 3)).mul(0.45).add(0.55));
+        const d = at.sub(centre).length().div(r);
         best.x.assign(max(best.x, smoothstep(0.75, 1, d).oneMinus()));
         best.y.assign(max(best.y, smoothstep(1.2, 1.9, d).oneMinus()));
       });

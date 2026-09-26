@@ -586,9 +586,15 @@ const leafHash = (p) => fract(sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453));
 const foliageTone = Fn(([l]) => {
   const tone = float(1).toVar();
   const kind = l.z;
-  const u = l.x.clamp(0, 1),
-    v = l.y,
-    av = abs(v);
+  // (Worked out here, before the branches: an expression first used inside one branch is
+  // computed there only, and the other branches would read nothing -- the pines' tufts and
+  // the ferns were cut away whole.)
+  const u = float(0).toVar(),
+    v = float(0).toVar(),
+    av = float(0).toVar();
+  u.assign(l.x.clamp(0, 1));
+  v.assign(l.y);
+  av.assign(abs(l.y));
   If(kind.greaterThanEqual(0.5).and(kind.lessThan(1.5)), () => {
     // A spruce spray: a feather of side shoots, ragged at the edge. Broad from where it
     // leaves the trunk (so the trunk is hidden), tapering out.
