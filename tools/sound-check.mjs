@@ -129,7 +129,9 @@ if (extras.length) {
   for (const r of extras) console.log(`${r.name.padEnd(23)} ${Object.entries(r.extra).map(([k, v]) => `${k} ${Array.isArray(v) ? v.join("/") : v}`).join("  ")}`);
 }
 const starts = results.map((r) => r.startMs);
-console.log(`\nfirst click (building the graph): ${Math.min(...starts)}-${Math.max(...starts)} ms, ${Math.max(...results.map((r) => r.baseNodes))} nodes; ambient sounds made ${Math.max(...results.filter((r) => r.kind !== "stress").map((r) => r.bubbleNodes))} nodes in a scene at most; loudest peak ${Math.max(...results.map((r) => r.peak))} dBFS (${results.reduce((a, r) => (r.peak > a.peak ? r : a)).name})`);
+const made = results.map((r) => r.madeMs).filter((v) => v !== undefined);
+if (made.length) console.log(`\nmaking the samples while loading: ${Math.min(...made)}-${Math.max(...made)} ms of work (in 4 ms slices)`);
+console.log(`first click (building the graph): ${Math.min(...starts)}-${Math.max(...starts)} ms, ${Math.max(...results.map((r) => r.baseNodes))} nodes; ambient sounds made ${Math.max(...results.filter((r) => r.kind !== "stress").map((r) => r.bubbleNodes))} nodes in a scene at most; loudest peak ${Math.max(...results.map((r) => r.peak))} dBFS (${results.reduce((a, r) => (r.peak > a.peak ? r : a)).name})`);
 
 // ---- The checks.
 const get = (name) => results.find((r) => r.name === name);
@@ -178,6 +180,21 @@ if (calls.length === 5) {
       if (Math.abs(a.centroid - b.centroid) / Math.min(a.centroid, b.centroid) < 0.2 && Math.abs(a.bands[2] - b.bands[2]) < 10) clash.push(`${a.name}/${b.name}`);
     }
   check(`the calls sound different (centroids ${calls.map((r) => r.centroid).join(", ")}): ${clash.length ? clash.join(" ") : "all apart"}`, !clash.length);
+}
+// The parts of the river sound different: each about as loud, brighter up in the brook and
+// darkest at sea, their spectra apart, the big river surging, the sea heaving.
+const REGIONS = ["brook", "upper", "middle", "lower", "estuary", "sea"].map((r) => get(`bed_${r}`));
+if (REGIONS.every(Boolean)) {
+  const [brook, upper, middle, lower, estuary, sea] = REGIONS;
+  for (const r of REGIONS) check(`${r.name} about -28 LUFS (${r.full}), full and phone within 3 dB (${(r.full - r.phone).toFixed(1)})`, Math.abs(r.full + 28) <= 3 && r.full - r.phone <= 3);
+  check(`brighter upstream, darkest at sea: centroids ${REGIONS.map((r) => r.centroid).join(" / ")}`, brook.centroid > upper.centroid && upper.centroid > middle.centroid && middle.centroid > lower.centroid && REGIONS.every((r) => r === sea || r.centroid > sea.centroid));
+  const dist = (a, b) => a.bands.reduce((s, v, i) => s + Math.abs(10 * Math.log10((v + 0.01) / (b.bands[i] + 0.01))), 0) / a.bands.length;
+  check(`spectra apart: brook/middle ${dist(brook, middle).toFixed(1)} dB, middle/sea ${dist(middle, sea).toFixed(1)} dB (≥ 3)`, dist(brook, middle) >= 3 && dist(middle, sea) >= 3);
+  check(`the big river surges at 40-150 Hz: ${middle.extra.surge} dB (brook ${brook.extra.surge})`, middle.extra.surge >= 1.5 && middle.extra.surge >= brook.extra.surge + 1);
+}
+if (get("bed_sea_swell")?.extra) {
+  const e = get("bed_sea_swell").extra;
+  check(`the sea heaves at 150-500 Hz: ${e.swell} dB, every ${e.period} s`, e.swell >= 2 && e.period >= 8 && e.period <= 12);
 }
 // Nothing clips: the limiter holds every scene's peaks under full scale.
 const peaky = results.filter((r) => r.peak > -1);

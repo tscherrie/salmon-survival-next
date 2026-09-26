@@ -335,10 +335,14 @@ export function makeReel() {
 export function createWorkshop() {
   const jobs = [];
   let timer = null;
+  // (How long it has worked in all, for the checks.)
+  let spent = 0;
   function slice() {
     timer = null;
-    const until = performance.now() + 4;
+    const from = performance.now(),
+      until = from + 4;
     while (jobs.length && performance.now() < until) if (jobs[0].next().done) jobs.shift();
+    spent += performance.now() - from;
     if (jobs.length) timer = setTimeout(slice, 0);
   }
   return {
@@ -347,7 +351,15 @@ export function createWorkshop() {
       if (!timer) timer = setTimeout(slice, 0);
     },
     finish() {
+      const from = performance.now();
       while (jobs.length) if (jobs[0].next().done) jobs.shift();
+      spent += performance.now() - from;
+    },
+    get left() {
+      return jobs.length;
+    },
+    get spent() {
+      return spent;
     },
   };
 }

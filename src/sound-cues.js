@@ -184,7 +184,7 @@ export function makeMerganser() {
 // of a second and falling.
 export function makeSealWhoosh() {
   const d = mono(1.2);
-  shaped(d, 0, random(280, 320), 0.7, 1.1, 1, (u) => (u < 0.7 ? Math.pow(Math.sin((Math.PI / 2) * (u / 0.7)), 2) : Math.pow(Math.cos((Math.PI / 2) * ((u - 0.7) / 0.3)), 2)));
+  shaped(d, 0, random(240, 270), 0.8, 1.1, 1, (u) => (u < 0.7 ? Math.pow(Math.sin((Math.PI / 2) * (u / 0.7)), 2) : Math.pow(Math.cos((Math.PI / 2) * ((u - 0.7) / 0.3)), 2)));
   return [normalize(fadeOut(d))];
 }
 // Now and then a seal's moan, heard far through the water: 220 falling to 140 Hz, wavering.
@@ -201,7 +201,7 @@ export function makeSealMoan() {
 // The bear: two huffs of breath and a short, rough growl (90-120 Hz, its overtones buzzing).
 export function makeBear() {
   const d = mono(1);
-  for (const at of [0, 0.24]) shaped(d, at, 380, 0.5, 0.15, 0.9, (u) => Math.min(1, u / 0.15) * Math.pow(1 - u, 1.5));
+  for (const at of [0, 0.24]) shaped(d, at, random(560, 640), 0.7, 0.15, 0.9, (u) => Math.min(1, u / 0.15) * Math.pow(1 - u, 1.5));
   const f = random(90, 120);
   let phase = 0;
   const start = Math.floor(0.5 * RATE);

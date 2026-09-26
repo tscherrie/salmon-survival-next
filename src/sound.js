@@ -26,6 +26,7 @@
 
 import { RATE, random, pick, makeBurst, KNOCKS, makeBlup, makeSplash, makeSwallow, createWorkshop, makeAll, step, stepSize } from "./sound-make.js";
 import { makeCues } from "./sound-cues.js";
+import { makeWorld } from "./sound-world.js";
 
 const STORAGE_KEY = "habitat-sound";
 // The master level, with sound on and nothing hushing it.
@@ -45,13 +46,14 @@ const AMBIENT_VOICES = 32;
 const MIX = {
   rush: 0.37,
   rumble: 0.23,
-  flow: 0.85,
+  flow: 0.9,
   burble: 0.37,
   roar: 0.6,
   roarLow: 0.37,
-  wash: 0.4,
-  washMid: 0.6,
+  wash: 0.5,
+  washMid: 1.15,
   gurgle: 0.8,
+  gravel: 0.15,
   rain: 0.4,
   rainUnder: 0.65,
   air: 0.5,
@@ -118,6 +120,7 @@ export function createSound() {
     clock = 0,
     nextGurgle = 0,
     nextBubble = 0,
+    nextGravel = 0,
     nextSteer = 0,
     lastSwallow = 0,
     submerged = 1,
@@ -145,18 +148,17 @@ export function createSound() {
   // What keeps it quiet (a pause, the logbook, death, a hidden page): each its own reason,
   // so that one ending does not end the others.
   const hushes = new Set();
-  // The world round the fish as update() was last told it (one object, kept).
   // What the ear knows of each hunter (by the game's own object for it), and the ones heard
   // in the last round of warnings.
   const heard = new WeakMap();
   const tracked = [];
-  const here = { brook: 0, upper: 0, middle: 1, lower: 0, estuary: 0, sea: 0, flow: 1, depthRel: 0.5, ice: 0, flood: 0, energy: 1, breath: 1, winded: false, danger: 0, home: 0, mill: 0 };
   const raw = {};
   const banks = {};
   const sized = new Map();
   const workshop = createWorkshop();
   workshop.add(makeAll(raw));
   workshop.add(makeCues(raw));
+  workshop.add(makeWorld(raw));
 
   // (At half the rate for what has nothing much high in it: see half() in sound-make.js.)
   const toBuffer = (channels, rate = channels.rate ?? RATE) => {
@@ -303,7 +305,8 @@ export function createSound() {
     const rushGain = amp(0);
     loop(brown).connect(rushFilter).connect(rushGain).connect(ambience);
     const rumbleGain = amp(0);
-    loop(brown).connect(filter("lowpass", 90, 0.9)).connect(rumbleGain).connect(ambience);
+    const rumbleFilter = filter("lowpass", 90, 0.9);
+    loop(brown).connect(rumbleFilter).connect(rumbleGain).connect(ambience);
     // The flow over it: the water moving past stones, a band in the low middle (where a
     // phone's small speaker still plays), and a burble above that, both slowly swelling.
     const flowBand = filter("bandpass", 480, 0.9);
@@ -325,7 +328,7 @@ export function createSound() {
     const washGain = amp(0);
     const washSource = loop(pink);
     washSource.connect(washFilter).connect(washGain).connect(ambience);
-    const washMid = filter("bandpass", 380, 0.8);
+    const washMid = filter("bandpass", 330, 1.3);
     const washMidGain = amp(0);
     washSource.connect(washMid).connect(washMidGain).connect(ambience);
     // The air, for leaps: the river as it sounds from above it, babbling and splashing over
@@ -368,6 +371,7 @@ export function createSound() {
         rush: knob(rushGain.gain),
         rushTone: knob(rushFilter.frequency, 0.015, 1),
         rumble: knob(rumbleGain.gain),
+        rumbleTone: knob(rumbleFilter.frequency, 0.015, 1),
         flow: knob(flowGain.gain),
         flowTone: knob(flowBand.frequency, 0.015, 1),
         burble: knob(burbleGain.gain),
@@ -388,7 +392,7 @@ export function createSound() {
       // Moved only when the ear crosses the surface, at the pace of the crossing.
       crossing: { waterDuck: waterDuck.gain, dry: dry.gain, wet: wet.gain, airOpen: airOpen.gain, surface: surface.gain, air: air.gain },
     };
-    for (const name of ["bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear"]) bank(name);
+    for (const name of ["gravel", "bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear"]) bank(name);
     bank("white");
     bank("brown");
     return true;
@@ -546,7 +550,7 @@ export function createSound() {
     },
     // What it is doing (for the diagnostics): the device's state and the sounds playing.
     get stats() {
-      return { state: context?.state ?? "none", time: context?.currentTime ?? 0, live, peakLive, nodes: made, bytes, asleep, level, hushes: [...hushes], sleepIn: (sleepAt - performance.now()) / 1000 };
+      return { state: context?.state ?? "none", time: context?.currentTime ?? 0, live, peakLive, nodes: made, bytes, making: workshop.left, madeMs: workshop.spent, asleep, level, hushes: [...hushes], sleepIn: (sleepAt - performance.now()) / 1000 };
     },
     // For extensions (src/mods.js): the context and the groups to play into, while the
     // sound is on and running, else null. What plays into a group goes through the master,
@@ -954,22 +958,6 @@ export function createSound() {
     // a strike about to come, `home` the scent of the home brook, `mill` how near the wheel.
     update(dt, { rain = 0, daylight = 1, stir = 0, roar = 0, sea = 0, above = false, submerged: under = above ? 0 : 1, depth = 1, regions = null, flow = 1, depthRel = 0.5, ice = 0, flood = 0, energy = 1, breath = 1, winded = false, danger = 0, home = 0, mill = 0 } = {}) {
       if (!context || !nodes) return;
-      here.brook = regions ? (regions.brook ?? 0) : 0;
-      here.upper = regions ? (regions.upper ?? 0) : 0;
-      here.middle = regions ? (regions.middle ?? 0) : 1 - sea;
-      here.lower = regions ? (regions.lower ?? 0) : 0;
-      here.estuary = regions ? (regions.estuary ?? 0) : 0;
-      here.sea = regions ? (regions.sea ?? sea) : sea;
-      here.flow = flow;
-      here.depthRel = depthRel;
-      here.ice = ice;
-      here.flood = flood;
-      here.energy = energy;
-      here.breath = breath;
-      here.winded = winded;
-      here.danger = danger;
-      here.home = home;
-      here.mill = mill;
       if (performance.now() >= sleepAt) sleep();
       submerged += (under - submerged) * (1 - Math.exp(-dt / EASE));
       if (context.state !== "running") return;
@@ -977,19 +965,40 @@ export function createSound() {
       if (!(Math.abs(under - crossing) < 0.02)) cross(under, now);
       clock += dt;
       const stirred = Math.min(1, stir);
-      const river = 1 - sea;
       const night = 1 - daylight;
+      // Where the fish is (without the regions, the river or the sea by `sea`): a brook's
+      // bright, quick water; a big river's slow, deep weight; the sea's swell.
+      const seaW = regions ? (regions.sea ?? sea) + 0.5 * (regions.estuary ?? 0) : sea;
+      const brookish = regions ? (regions.brook ?? 0) + 0.5 * (regions.upper ?? 0) : 0;
+      const big = regions ? (regions.middle ?? 0) + (regions.lower ?? 0) + 0.5 * (regions.upper ?? 0) + 0.5 * (regions.estuary ?? 0) : 1 - sea;
+      // (The lower river and the estuary: wide, slow and silty, darker still.)
+      const low = regions ? (regions.lower ?? 0) + 0.25 * (regions.estuary ?? 0) : 0;
+      const river = 1 - seaW;
+      const flowK = Math.min(1.5, Math.max(0, flow / 5));
       if (clock > nextBubble) {
-        const rate = 1.2 + 5 * stirred + 4 * rain + 14 * roar;
+        // (Sparser at sea, and lower: bigger bubbles, from further off.)
+        const rate = (1.2 + 5 * stirred + 4 * rain + 14 * roar) * (1 - 0.7 * seaW);
         nextBubble = clock + -Math.log(1 - Math.random()) / rate;
-        if (submerged > 0.5 && wanted()) play(pick(bank("bubble")), nodes.ambience, (0.05 + Math.random() * 0.08) * MIX.bubble, now + 0.02, random(0.9, 1.15), 0, true);
+        if (submerged > 0.5 && wanted()) play(pick(bank("bubble")), nodes.ambience, (0.05 + Math.random() * 0.08) * MIX.bubble, now + 0.02, random(0.9, 1.15) * (1 - 0.3 * seaW), 0, true);
       }
+      // Eddies gurgling: in a brook higher, narrower and quicker, with the current.
       if (clock > nextGurgle) {
-        nextGurgle = clock + 0.35 + Math.random() * 0.9;
-        const g = pick(nodes.gurgles);
-        g.band.frequency.setTargetAtTime(g.base * (0.7 + Math.random() * 0.8), now, 0.25);
-        g.level.gain.setTargetAtTime(MIX.gurgle * (0.25 + Math.random() * 0.55) * (1 + stirred + roar) * (1 - 0.3 * night) * river, now, 0.2);
-        g.level.gain.setTargetAtTime(MIX.gurgle * 0.05 * river, now + 0.5 + Math.random() * 0.6, 0.4);
+        nextGurgle = clock + (0.35 + Math.random() * 0.9) * (1 - 0.62 * brookish);
+        const i = Math.floor(Math.random() * nodes.gurgles.length);
+        const g = nodes.gurgles[i];
+        const base = 220 + 140 * i + (230 + 120 * i) * brookish;
+        const loud = MIX.gurgle * (0.6 + 0.8 * brookish) * (0.5 + 0.5 * flowK) * (1 + stirred + roar) * (1 - 0.3 * night) * river;
+        g.band.Q.setValueAtTime(6 + i + 4 * brookish, now);
+        g.band.frequency.setTargetAtTime(base * (0.7 + Math.random() * 0.8), now, 0.25 * (1 - 0.6 * brookish));
+        g.level.gain.setTargetAtTime(loud * (0.25 + Math.random() * 0.55), now, 0.2 * (1 - 0.5 * brookish));
+        g.level.gain.setTargetAtTime(loud * 0.06, now + (0.5 + Math.random() * 0.6) * (1 - 0.6 * brookish), 0.4 * (1 - 0.5 * brookish));
+      }
+      // Gravel ticking along the bed of a brook, the more the harder it runs and the nearer
+      // the bed the fish is.
+      if (clock > nextGravel) {
+        const rate = Math.min(10, (1.5 + 6 * flowK) * brookish * (0.3 + 0.7 * depthRel));
+        nextGravel = clock + (rate > 0.05 ? -Math.log(1 - Math.random()) / rate : 1);
+        if (rate > 0.05 && submerged > 0.5 && wanted()) play(pick(bank("gravel")), nodes.ambience, MIX.gravel * random(0.3, 1), now + 0.02, random(0.9, 1.1), 0, true);
       }
       // The heart: when strength runs low, or a strike is about to come; on for ten seconds
       // after, fading over the last four and slowing. It ducks the river under it a little.
@@ -1011,30 +1020,39 @@ export function createSound() {
       if (clock < nextSteer) return;
       nextSteer = clock + STEER;
       const k = nodes.knobs;
-      // (-6 dB at the bus comes out at about -3 through the compressor.)
-      steer(k.ambience, beating ? 0.5 : 1, now, 0.5);
+      steer(k.ambience, beating ? 0.71 : 1, now, 0.5);
       const swell = 0.8 + 0.2 * Math.sin(clock * 0.21) + 0.08 * Math.sin(clock * 0.53 + 1.3);
       const burble = 0.75 + 0.25 * Math.sin(clock * 0.37 + 2) * Math.sin(clock * 0.11);
-      steer(k.rush, MIX.rush * (0.5 + 0.25 * stirred) * swell * (1 - 0.25 * night) * (0.45 + 0.55 * river), now, 0.4);
-      steer(k.rushTone, 380 + 240 * stirred - 90 * night - 120 * sea, now, 0.3);
-      steer(k.rumble, MIX.rumble * (0.9 + 0.1 * swell), now, 1);
-      steer(k.flow, MIX.flow * swell * (1 + 0.5 * stirred) * (1 - 0.3 * night) * (0.35 + 0.65 * river), now, 0.4);
-      steer(k.flowTone, 480 + 160 * stirred - 60 * night - 100 * sea, now, 0.4);
-      steer(k.burble, MIX.burble * burble * (1 + 0.8 * stirred + roar) * (1 - 0.35 * night) * river, now, 0.5);
-      steer(k.burbleTone, 820 + 200 * stirred - 80 * night, now, 0.5);
+      // A big river's weight comes in slow surges, 40-150 Hz, every fifteen seconds or so.
+      const surge = 0.55 + 0.45 * Math.sin(2 * Math.PI * 0.07 * clock + 1.5 * Math.sin(2 * Math.PI * 0.023 * clock));
+      const weight = 1 + big * (surge * (0.6 + 0.4 * flowK) - 0.5);
+      // The sea's swell: a slow heave, about every ten seconds, the wash rising and brightening
+      // with it, and what is left of the river's sound going with it.
+      const heave = 0.5 + 0.5 * Math.sin(2 * Math.PI * 0.1 * clock + 0.3 * Math.sin(2 * Math.PI * 0.031 * clock));
+      const heaving = 1 - 0.4 * seaW * (1 - heave);
+      steer(k.rush, MIX.rush * (0.5 + 0.25 * stirred) * swell * (1 - 0.25 * night) * (0.45 + 0.55 * river) * weight * heaving, now, 0.4);
+      steer(k.rushTone, 380 + 240 * stirred - 90 * night - 120 * seaW - 60 * big - 60 * low + 120 * brookish, now, 0.3);
+      steer(k.rumble, MIX.rumble * (0.9 + 0.1 * swell) * weight * (1 - 0.5 * brookish), now, 0.5);
+      steer(k.rumbleTone, 90 + 30 * big, now, 1);
+      steer(k.flow, MIX.flow * swell * (1 + 0.5 * stirred) * (1 - 0.3 * night) * (0.05 + 0.95 * river) * (0.8 + 0.3 * flowK) * (1 - 0.25 * low) * heaving, now, 0.4);
+      steer(k.flowTone, 480 + 160 * stirred - 60 * night - 100 * seaW - 40 * big - 50 * low + 200 * brookish, now, 0.4);
+      steer(k.burble, MIX.burble * burble * (1 + 0.8 * stirred + roar) * (1 - 0.35 * night) * river * (1 - 0.3 * big - 0.3 * low + 0.6 * brookish) * (0.8 + 0.4 * depthRel), now, 0.5);
+      steer(k.burbleTone, 820 + 200 * stirred - 80 * night + 350 * brookish - 120 * low, now, 0.5);
       steer(k.roar, MIX.roar * roar, now, 0.5);
       steer(k.roarLow, MIX.roarLow * roar, now, 0.5);
       steer(k.whiteWater, MIX.whiteWater * roar, now, 0.5);
-      const wash = 0.55 + 0.45 * Math.sin(clock * 0.13) * Math.sin(clock * 0.047 + 1);
-      steer(k.wash, MIX.wash * sea * wash, now, 1.2);
-      steer(k.washTone, 200 + 260 * wash, now, 1);
-      steer(k.washMid, MIX.washMid * sea * (0.4 + 0.6 * wash), now, 1.2);
+      // (Where river and sea meet, the sea's part of it a little more than half.)
+      const washing = Math.sqrt(seaW);
+      steer(k.wash, MIX.wash * washing * (0.3 + 0.7 * Math.pow(heave, 1.5)), now, 0.5);
+      steer(k.washTone, 160 + 260 * heave, now, 0.5);
+      steer(k.washMid, MIX.washMid * washing * (0.3 + 0.7 * heave), now, 0.5);
       steer(k.air, MIX.air * (0.8 + 0.2 * swell) * (1 + 0.6 * roar + 0.8 * rain), now, 0.4);
       steer(k.rain, MIX.rain * rain, now, 1.2);
       steer(k.rainUnder, MIX.rainUnder * rain, now, 1.2);
       // The gills working while winded, harder the less breath there is.
       steer(k.gills, winded ? MIX.gills * Math.min(1, Math.max(0.2, 1 - breath / 0.45)) : 0, now, 0.3);
-      clearTone = 7000 * (1 - 0.3 * night) * (1 - 0.45 * Math.min(1, depth / 40));
+      // (The open sea darker too: its water takes more of the top.)
+      clearTone = 7000 * (1 - 0.3 * night) * (1 - 0.45 * Math.min(1, depth / 40)) * (1 - 0.35 * seaW);
       steer(k.waterTone, waterTone(), now, 0.4);
     },
   };

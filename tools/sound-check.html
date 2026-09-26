@@ -153,6 +153,17 @@
     { name: "bed_rain", kind: "bed", params: { rain: 1 } },
     { name: "bed_sea_deep", kind: "bed", params: { sea: 1, depth: 40 } },
     { name: "bed_above", kind: "bed", params: { submerged: 0 } },
+    // Each part of the river on its own, at its current (probe-v2 means), a little below the
+    // middle of the water.
+    ...[
+      ["brook", 1.6],
+      ["upper", 2],
+      ["middle", 2.6],
+      ["lower", 4.9],
+      ["estuary", 1],
+      ["sea", 0.2],
+    ].map(([region, flow]) => ({ name: `bed_${region}`, kind: "bed", params: { regions: only(region), sea: region === "sea" ? 1 : 0, flow, depthRel: 0.6 }, measure: (m) => ({ surge: m.modulation(3, 8, 40, 150) }) })),
+    { name: "bed_sea_swell", kind: "bed", seconds: 24, params: { regions: only("sea"), sea: 1, flow: 0.2, depthRel: 0.6 }, measure: (m) => ({ swell: m.modulation(3, 24, 150, 500), period: m.period(3, 24, 150, 500, 6, 14) }) },
     { name: "bed_above_roar", kind: "bed", params: { submerged: 0, roar: 1 } },
     { name: "bed_above_rain", kind: "bed", params: { submerged: 0, rain: 1 } },
     { name: "cross_river", kind: "cross", params: (t) => ({ submerged: air(t) }) },
@@ -263,8 +274,10 @@
       localStorage.removeItem("habitat-sound");
     } catch {}
     const sound = createSound();
-    // As in the game: the sound object exists a while (the loading) before the first click.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // As in the game: the sound object exists a while (the loading) before the first click,
+    // time for it to make its samples (up to 3 s here; the game loads for longer).
+    for (let i = 0; i < 30 && (i < 3 || sound.stats?.making); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    const madeMs = sound.stats?.madeMs;
     const t0 = performance.now();
     sound.start();
     const startMs = performance.now() - t0;
@@ -304,7 +317,7 @@
     }
     const buffer = await ctx.startRendering();
     const stats = sound.stats ?? {};
-    return { buffer, startMs, baseNodes, shotNodes, bubbleNodes, maxLive, nodes: ctx.count, bytes: stats.bytes, updateUs: (updateMs * 1000) / (seconds / dt), live: stats.live };
+    return { buffer, startMs, madeMs, baseNodes, shotNodes, bubbleNodes, maxLive, nodes: ctx.count, bytes: stats.bytes, updateUs: (updateMs * 1000) / (seconds / dt), live: stats.live };
   }
 
   // ---- Measuring.
@@ -501,7 +514,7 @@
     const channels = [r.buffer.getChannelData(0), r.buffer.getChannelData(1)];
     const k = channels.map(kweight);
     const kp = channels.map((c) => kweight(phone(c)));
-    const out = { name: scene.name, kind: scene.kind, startMs: +r.startMs.toFixed(1), baseNodes: r.baseNodes, shotNodes: r.shotNodes, bubbleNodes: r.bubbleNodes, maxLive: r.maxLive, nodes: r.nodes, bytes: r.bytes, updateUs: +r.updateUs.toFixed(1) };
+    const out = { name: scene.name, kind: scene.kind, startMs: +r.startMs.toFixed(1), madeMs: r.madeMs === undefined ? undefined : Math.round(r.madeMs), baseNodes: r.baseNodes, shotNodes: r.shotNodes, bubbleNodes: r.bubbleNodes, maxLive: r.maxLive, nodes: r.nodes, bytes: r.bytes, updateUs: +r.updateUs.toFixed(1) };
     let peak = 0;
     for (const c of channels) for (let i = 0; i < c.length; i++) peak = Math.max(peak, Math.abs(c[i]));
     out.peak = +(20 * Math.log10(peak + 1e-20)).toFixed(1);
