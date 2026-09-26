@@ -82,6 +82,8 @@ export const SHOTS = [
   { name: "wurzelufer", stage: "parr", at: 560, season: "summer", hour: 13, view: { eye: [0, 11, -0.7], target: [5, 18, -1] } },
   // The beavers' lodge on the Erlenbach: sticks on a mud dome.
   { name: "biberburg", stage: "parr", at: 1022, season: "summer", hour: 13, view: { eye: [-11.5, 40.5, 1.6], target: [-6.8, 46, 0.8] } },
+  // The ice going out in April, from under it: floes drifting over the nursery pool.
+  { name: "eisgang", stage: "alevin", at: 240, season: "spring", hour: 12, event: "floes", view: { eye: [-8, 0, -2.4], target: [12, 0, -0.3] } },
 ];
 
 const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));

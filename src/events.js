@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import { waterLit } from "./render/water.js";
-import { mix, positionWorld, sin, smoothstep, step, vertexColor } from "three/tsl";
+import { abs, dot, float, floor, fract, fwidth, max, min, mix, normalWorldGeometry, positionLocal, sin, smoothstep, sqrt, step, vec2, vec3, vertexColor } from "three/tsl";
+import { fogNodes } from "./render/fog.js";
+import { noise3 } from "./materials.js";
+import { rockShape } from "./render/rocks.js";
 import { MODEL_LENGTH, createFishMesh } from "./anatomy.js";
 import { bed, current, frame, level, locate, place, regionWeights, section } from "./course.js";
 import { conditions } from "./seasons.js";
@@ -596,39 +599,83 @@ export function createEvents(scene, { rocks, sound, daylight, life, random = Mat
   // ---------------------------------------------------------------------------------------
   // The ice going out: floes on the melt.
   const FLOES = 28;
-  // A floe: a slab broken off the river's ice, its edge jagged where it cracked, old snow
-  // lying on it, the broken sides glassy blue-green, the underside grey. Four outlines,
-  // one instanced mesh each, so neighbours differ.
+  // A floe: a slab broken off the river's ice (a slab from render/rocks.js, flattened): its
+  // edge broken where it cracked, lumpy underneath where it froze onto the flow, old snow
+  // lying on top. From below, ice is bright: the day comes through it, blue-white under
+  // the slab and at its broken edges -- not a dark lid. Four shapes, one instanced mesh
+  // each, so neighbours differ.
   // (The vertex colours are read by the colour node itself.)
+  // Where a plane is split into cells round scattered points: 1 on the lines between cells,
+  // 0 away from them (the two nearest points almost equally near).
+  const cellEdges = (p) => {
+    const i = floor(p),
+      f = fract(p);
+    let d1 = float(8),
+      d2 = float(8);
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const o = vec2(dx, dy);
+        const c = i.add(o);
+        const h = fract(sin(vec2(dot(c, vec2(127.1, 311.7)), dot(c, vec2(269.5, 183.3)))).mul(43758.5453));
+        const r = o.add(h.mul(0.9).add(0.05)).sub(f);
+        const d = dot(r, r);
+        d2 = min(d2, max(d1, d));
+        d1 = min(d1, d);
+      }
+    const gap = sqrt(d2).sub(sqrt(d1));
+    return smoothstep(max(fwidth(gap).mul(1.5), 0.012), 0, gap);
+  };
   const floeMaterial = new THREE.MeshStandardNodeMaterial({ roughness: 0.35 });
-  // The old snow on top lies in drifts and patches, grey where it has gone slushy.
+  // The old snow on top lies in drifts and patches, grey where it has gone slushy. (All of
+  // it drawn in the floe's own frame, so it drifts and turns with the floe.)
   {
-    const q = positionWorld.xz;
+    const q = positionLocal.xz.mul(4);
     const drift = sin(q.x.mul(0.9).add(sin(q.y.mul(0.7)).mul(2))).mul(0.25).add(sin(q.y.mul(1.3).add(sin(q.x.mul(0.5)).mul(1.7))).mul(0.25)).add(0.5);
     const slush = smoothstep(0.62, 0.9, sin(q.x.mul(0.31).add(q.y.mul(0.23)).add(sin(q.x.mul(0.11)).mul(3))).mul(0.5).add(0.5));
     const base = vertexColor();
     floeMaterial.colorNode = base.mul(mix(drift.mul(0.14).add(0.86), 0.72, slush.mul(step(0.8, base.b))));
+    // The light through it: as bright as the water round it and brighter, whitest where
+    // the ice is thin at the edge, clouded with frozen bubbles, crossed by the cracks it
+    // froze and broke along (straight, between plates: the edges of a cell pattern).
+    const Ny = normalWorldGeometry.y;
+    const under = smoothstep(-0.2, -0.85, Ny);
+    const edge = smoothstep(0.75, 0.2, abs(Ny)).mul(under.oneMinus());
+    const L = positionLocal.mul(vec3(1, 4, 1));
+    const bubbles = noise3(L.mul(vec3(5, 5, 2))).mul(0.6).add(noise3(L.mul(14)).mul(0.4));
+    // (A few long cracks, not a net: most edges of the pattern left out.)
+    const crack = cellEdges(positionLocal.xz.mul(1.3)).mul(smoothstep(0.5, 0.62, noise3(L.mul(1.1).add(19)))).mul(0.35);
+    const thick = smoothstep(0.35, 0.75, noise3(L.mul(1.3).add(7)));
+    floeMaterial.emissiveNode = mix(fogNodes().color, vec3(dot(fogNodes().color, vec3(0.3, 0.55, 0.15))), 0.35)
+      .mul(vec3(0.85, 1.02, 1.25))
+      .mul(under.mul(2.4).add(edge.mul(1.3)))
+      .mul(bubbles.mul(0.7).add(0.55))
+      .mul(thick.mul(-0.3).add(1))
+      .mul(crack.oneMinus());
     waterLit(floeMaterial);
   }
   const floeMeshes = [];
   for (let v = 0; v < 4; v++) {
-    const shape = new THREE.Shape();
-    const n = 22;
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * TAU;
-      const r = 0.82 + 0.14 * Math.sin(a * 2 + v * 1.7) + 0.08 * Math.sin(a * 5 + v * 3.1) + (i % 2 ? -0.06 : 0.05) * (0.5 + 0.5 * Math.sin(i * 7.3 + v));
-      if (i === 0) shape.moveTo(Math.cos(a) * r, Math.sin(a) * r);
-      else shape.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    const shape = rockShape(40.3 + v * 2.9, { family: "slab", freq: 6 });
+    // (Its height from 0 to 1, as the floes are placed: a tenth of it above the water.)
+    const position = shape.position.slice(),
+      normal = shape.normal.slice();
+    for (let i = 0; i < position.length; i += 3) {
+      position[i + 1] = (position[i + 1] + 1) / 2;
+      normal[i + 1] *= 2;
+      const l = Math.hypot(normal[i], normal[i + 1], normal[i + 2]) || 1;
+      normal[i] /= l;
+      normal[i + 1] /= l;
+      normal[i + 2] /= l;
     }
-    const g = new THREE.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: true, bevelThickness: 0.18, bevelSize: 0.07, bevelSegments: 2 }).rotateX(-Math.PI / 2);
-    g.computeVertexNormals();
-    const p = g.attributes.position,
-      nn = g.attributes.normal;
-    const color = new Float32Array(p.count * 3);
-    for (let i = 0; i < p.count; i++) {
-      const ny = nn.getY(i);
-      const grain = 0.94 + 0.06 * Math.sin(p.getX(i) * 9.1 + p.getZ(i) * 7.3 + v);
-      color.set(ny > 0.55 ? [0.9 * grain, 0.93 * grain, 0.96 * grain] : ny < -0.55 ? [0.3, 0.4, 0.45] : [0.42, 0.64, 0.7], i * 3);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(position, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(normal, 3));
+    g.setIndex(new THREE.BufferAttribute(shape.index, 1));
+    const color = new Float32Array(position.length);
+    for (let i = 0; i < position.length / 3; i++) {
+      const ny = normal[i * 3 + 1];
+      const grain = 0.94 + 0.06 * Math.sin(position[i * 3] * 9.1 + position[i * 3 + 2] * 7.3 + v);
+      color.set(ny > 0.55 ? [0.9 * grain, 0.93 * grain, 0.96 * grain] : ny < -0.55 ? [0.62, 0.72, 0.78] : [0.55, 0.74, 0.8], i * 3);
     }
     g.setAttribute("color", new THREE.BufferAttribute(color, 3));
     const mesh = new THREE.InstancedMesh(g, floeMaterial, FLOES);
