@@ -1145,7 +1145,7 @@ export function createSound() {
       const burble = 0.75 + 0.25 * Math.sin(clock * 0.37 + 2) * Math.sin(clock * 0.11);
       // A big river's weight comes in slow surges, 40-150 Hz, every fifteen seconds or so.
       const surge = 0.55 + 0.45 * Math.sin(2 * Math.PI * 0.07 * clock + 1.5 * Math.sin(2 * Math.PI * 0.023 * clock));
-      const weight = 1 + big * (surge * (0.6 + 0.4 * flowK) - 0.5);
+      const weight = 1 + big * (1.3 * surge * (0.6 + 0.4 * flowK) - 0.6);
       // The sea's swell: a slow heave, about every ten seconds, the wash rising and brightening
       // with it, and what is left of the river's sound going with it.
       const heave = 0.5 + 0.5 * Math.sin(2 * Math.PI * 0.1 * clock + 0.3 * Math.sin(2 * Math.PI * 0.031 * clock));

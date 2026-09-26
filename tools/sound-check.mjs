@@ -87,9 +87,11 @@ if (wavDir) await mkdir(wavDir, { recursive: true });
 const results = [];
 for (const name of names) {
   const r = await evaluate(`runScene(${JSON.stringify(name)}, ${!!wavDir})`);
-  if (r.wav) {
-    await writeFile(join(wavDir, `${name}.wav`), Buffer.from(r.wav, "base64"));
-    delete r.wav;
+  if (wavDir) {
+    const length = await evaluate("lastWav.length");
+    let text = "";
+    for (let at = 0; at < length; at += 1 << 20) text += await evaluate(`lastWav.slice(${at}, ${at + (1 << 20)})`);
+    await writeFile(join(wavDir, `${name}.wav`), Buffer.from(text, "base64"));
   }
   results.push(r);
 }
@@ -157,7 +159,7 @@ if (get("charge")?.extra) {
 }
 if (get("bed_winded")?.extra && get("bed_river")?.extra) {
   const d = get("bed_winded").extra.gills - get("bed_river").extra.gills;
-  check(`bed_winded: the gills +1..+3.5 dB at 500-1500 Hz over bed_river: ${d.toFixed(1)}`, d >= 1 && d <= 3.5);
+  check(`bed_winded: the gills +1..+3.5 dB at 500-1500 Hz over bed_river (${d.toFixed(1)}), pulsing about 7 times a second (every ${get("bed_winded").extra.pulse} s)`, d >= 1 && d <= 3.5 && Math.abs(get("bed_winded").extra.pulse - 1 / 7) <= 0.02);
 }
 // Hunters: placed left and right, heard on a phone; pulses while hunting; the tick before
 // a strike standing out; the heart heard, ducking the river, and gone after its ten seconds.

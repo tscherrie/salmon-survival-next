@@ -357,7 +357,20 @@
         ctx.resume();
       });
     }
+    // (Now and then, on a busy machine, the offline context stays suspended after a resume
+    // that came a moment too soon, and the render never ends: nudged again if nothing has
+    // moved for two seconds.)
+    let moved = performance.now(),
+      at = -1;
+    const nudge = setInterval(() => {
+      if (ctx.currentTime !== at) (at = ctx.currentTime), (moved = performance.now());
+      else if (performance.now() - moved > 2000) {
+        moved = performance.now();
+        ctx.resume().catch(() => {});
+      }
+    }, 500);
     const buffer = await ctx.startRendering();
+    clearInterval(nudge);
     const stats = sound.stats ?? {};
     return { buffer, startMs, madeMs, baseNodes, shotNodes, bubbleNodes, maxLive, nodes: ctx.count, bytes: stats.bytes, updateUs: (updateMs * 1000) / (seconds / dt), live: stats.live };
   }
@@ -636,7 +649,9 @@
     const scene = SCENES.find((s) => s.name === name);
     const r = await render(scene);
     const out = measure(scene, r);
-    if (withWav) out.wav = wav(r.buffer);
+    // (Kept here and fetched a slice at a time: a long scene's .wav is too big for one
+    // message back.)
+    if (withWav) window.lastWav = wav(r.buffer);
     return out;
   };
   window.runAll = async () => {
