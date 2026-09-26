@@ -139,7 +139,11 @@ for (const q of ISLANDS) {
             else if (random() < 0.7) willow(ctx.trees, x, y, z, range(18, 32), random);
             else birch(ctx.trees, x, y, z, range(30, 55), random);
           }
-          if (kind === "alder" && random() < 0.015) fallenTrunk(ctx.trees, x, y, z, range(14, 24), random);
+          if (kind === "alder" && random() < 0.015)
+            fallenTrunk(ctx.trees, x, y, z, range(14, 24), random, (px, pz) => {
+              const at = ctx.locate(px, pz, s);
+              return { y: bed(at.s, at.u), level: level(at.s) };
+            });
         }
         // The tail is a bar of gravel and cobbles the river has dropped; the head a few
         // boulders that part the water.

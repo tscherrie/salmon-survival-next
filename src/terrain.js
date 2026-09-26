@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { rockGeometry } from "./render/geometry.js";
 import { GeometryBatch, randomGenerator } from "./render/geometry.js";
 import { PLANT_FADE, foliageMaterial, plantShare } from "./render/foliage.js";
-import { FALLS, MILLS, S, TRIBUTARIES, bedDetail, current, frame, level, passSlot, place, section, smooth, tributaryAt } from "./course.js";
+import { FALLS, MILLS, S, TRIBUTARIES, bedDetail, current, frame, level, locate, passSlot, place, section, smooth, tributaryAt } from "./course.js";
 import { SolidBatch } from "./flora.js";
 import { TreeBatch, birch, fallenTrunk, fern, forestMaterial, juniper, pine, shrub, spruce, stump } from "./forest.js";
 import * as flora from "./flora.js";
@@ -874,6 +874,13 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
 
     // The forest on the land either side: spruce in the shade of the brook, more pine and
     // birch lower down; under it juniper, bilberry, ferns, stumps and fallen trunks.
+    // (What lies on the land asks the ground under each of its points, and the water's
+    // level there: groundNear(s) for a point found from near s along the river.)
+    const where = { s: 0, u: 0 };
+    const groundNear = (hint) => (x, z) => {
+      locate(x, z, hint, where);
+      return { y: bedDetail(where.s, where.u), level: level(where.s) };
+    };
     if (r.sea < 0.5) {
       const trees = new TreeBatch();
       const want = Math.floor((area / 1000) * (r.brook * 5 + r.upper * 3.5 + r.middle * 2.2 + r.lower * 1.5 + r.estuary * 0.6));
@@ -896,8 +903,8 @@ export function createTerrain(scene, { bedMaterial, surfaceMaterial, rocks, deta
         if (which < 0.34) fern(trees, p.x, p.y, p.z, range(2.5, 5), random);
         else if (which < 0.7) shrub(trees, p.x, p.y, p.z, range(1.5, 3.5), random);
         else if (which < 0.82) juniper(trees, p.x, p.y, p.z, range(8, 20), random);
-        else if (which < 0.92) stump(trees, p.x, p.y, p.z, range(1.2, 2.6), random);
-        else fallenTrunk(trees, p.x, p.y, p.z, range(25, 60), random);
+        else if (which < 0.92) stump(trees, p.x, p.y, p.z, range(1.2, 2.6), random, groundNear(p.s));
+        else fallenTrunk(trees, p.x, p.y, p.z, range(25, 60), random, groundNear(p.s));
         if (k % 8 === 7) yield "forest";
       }
       if (!trees.empty) {

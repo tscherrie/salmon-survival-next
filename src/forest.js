@@ -489,12 +489,21 @@ export function shrub(batch, x, y, z, size, random) {
 }
 
 // An old stump, sawn or snapped, and a fallen trunk rotting on the moss.
-export function stump(batch, x, y, z, size, random) {
+//
+// ground(x, z), where given, is the ground's height and the water's level at a point
+// ({ y, level }): a stump then stands in the lowest ground under it (on a slope the uphill
+// side buried, not the downhill side hanging in the air), and a fallen trunk rests on the
+// ground under each of its points, not all at the height of its middle -- and ends, broken
+// off, where the ground under it goes down into the water, instead of reaching out over the
+// river in the air. (The numbers drawn are the same either way.)
+export function stump(batch, x, y, z, size, random, ground = null) {
   const range = ranger(random);
   const wood = new THREE.Color().setHSL(range(0.06, 0.09), range(0.2, 0.3), range(0.13, 0.18));
-  limb(batch, vec(x, y - 0.8, z), vec(x, y + size * range(1, 2.2), z), size * 0.55, size * 0.45, wood, { sides: 7, shade: barkShade, cap: true });
+  let foot = y;
+  if (ground) for (let k = 0; k < 4; k++) foot = Math.min(foot, ground(x + Math.cos((k / 4) * TAU) * size * 0.55, z + Math.sin((k / 4) * TAU) * size * 0.55).y);
+  limb(batch, vec(x, foot - 0.8, z), vec(x, y + size * range(1, 2.2), z), size * 0.55, size * 0.45, wood, { sides: 7, shade: barkShade, cap: true });
 }
-export function fallenTrunk(batch, x, y, z, length, random) {
+export function fallenTrunk(batch, x, y, z, length, random, ground = null) {
   const range = ranger(random);
   const a = range(0, TAU);
   const d = vec(Math.cos(a), 0, Math.sin(a));
@@ -506,20 +515,58 @@ export function fallenTrunk(batch, x, y, z, length, random) {
   // Lying in three pieces of a gentle bend, sagging where it rests.
   const bend = range(-1, 1) * length * 0.04;
   const points = [0, 0.33, 0.66, 1].map((t) => vec(x, y + r * 0.55, z).addScaledVector(d, (t - 0.5) * length).addScaledVector(side, Math.sin(Math.PI * t) * bend));
-  for (let i = 0; i < 3; i++) limb(batch, points[i], points[i + 1], r * (1 - i * 0.1), r * (0.9 - i * 0.1), wood, { sides: 8, cap: i === 2, shade: weathered });
+  // How far along it (0 at the foot, 1 at the top) it is still on land.
+  let whole = 1;
+  if (ground) {
+    const dry = (p) => {
+      const g = ground(p.x, p.z);
+      return g.y > g.level + 0.3 ? g.y : null;
+    };
+    for (let i = 0; i < 4; i++) {
+      const g = dry(points[i]);
+      if (g === null) {
+        // Broken off between the last point on land and this one.
+        let lo = 0,
+          hi = 1;
+        if (i > 0)
+          for (let k = 0; k < 5; k++) {
+            const mid = (lo + hi) / 2;
+            if (dry(points[i - 1].clone().lerp(points[i], mid)) === null) hi = mid;
+            else lo = mid;
+          }
+        whole = i > 0 ? (i - 1 + lo) / 3 : 0;
+        if (i > 0) {
+          const end = points[i - 1].clone().lerp(points[i], lo);
+          end.y = (dry(end) ?? points[i - 1].y - r * 0.55) + r * 0.55;
+          points[i] = end;
+        }
+        break;
+      }
+      points[i].y = g + r * 0.55;
+    }
+  }
+  const along = (t) => {
+    const f = Math.min(2.999, t * 3);
+    return points[Math.floor(f)].clone().lerp(points[Math.floor(f) + 1], f - Math.floor(f));
+  };
+  const pieces = whole >= 1 ? 3 : Math.ceil(whole * 3 - 1e-6);
+  if (whole > 0) for (let i = 0; i < pieces; i++) limb(batch, points[i], points[i + 1], r * (1 - i * 0.1), r * (0.9 - i * 0.1), wood, { sides: 8, cap: i === pieces - 1, shade: weathered });
   // The root plate torn up at the foot, earth still in it.
   const foot = points[0].clone().addScaledVector(d, -r * 0.3);
   const earth = new THREE.Color(0.14, 0.11, 0.08);
   for (let k = 0; k < 7; k++) {
     const ang = (k / 7) * TAU + range(-0.3, 0.3);
     const out = side.clone().multiplyScalar(Math.cos(ang)).add(vec(0, Math.sin(ang), 0)).normalize();
-    limb(batch, foot, foot.clone().addScaledVector(out, r * range(2.2, 3.4)).addScaledVector(d, -r * range(0.2, 0.8)), r * 0.35, r * 0.08, earth, { sides: 4 });
+    const tip = foot.clone().addScaledVector(out, r * range(2.2, 3.4)).addScaledVector(d, -r * range(0.2, 0.8));
+    if (whole > 0) limb(batch, foot, tip, r * 0.35, r * 0.08, earth, { sides: 4 });
   }
   // The stubs of its branches.
   for (let k = 0; k < 5; k++) {
-    const at = points[0].clone().lerp(points[3], range(0.25, 0.9));
+    const t = range(0.25, 0.9);
+    const at = along(t);
     const out = side.clone().multiplyScalar(range(-1, 1)).add(vec(0, range(0.2, 1), 0)).addScaledVector(d, range(0.2, 0.6)).normalize();
-    limb(batch, at, at.clone().addScaledVector(out, r * range(1.5, 4)), r * 0.28, r * 0.12, wood, { sides: 4, cap: true });
+    const tip = at.clone().addScaledVector(out, r * range(1.5, 4));
+    if (t < whole) limb(batch, at, tip, r * 0.28, r * 0.12, wood, { sides: 4, cap: true });
   }
 }
 
