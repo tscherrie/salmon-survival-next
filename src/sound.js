@@ -100,6 +100,10 @@ const MIX = {
   ending: 0.6,
   storm: 0.5,
   home: 0.5,
+  slap: 0.5,
+  creak: 0.25,
+  plops: 0.6,
+  counter: 0.6,
   crack: 0.7,
 };
 // The leap's sweet spot (main.js: a leap released above this on the swing clears the fall).
@@ -136,6 +140,8 @@ export function createSound() {
     nextGravel = 0,
     nextClatter = 0,
     nextChirp = 0,
+    nextSlap = 0,
+    nextCreak = 0,
     nextSteer = 0,
     lastSwallow = 0,
     submerged = 1,
@@ -421,7 +427,7 @@ export function createSound() {
       // Moved only when the ear crosses the surface, at the pace of the crossing.
       crossing: { pingsUnder: pingsUnder.gain, waterDuck: waterDuck.gain, dry: dry.gain, wet: wet.gain, airOpen: airOpen.gain, surface: surface.gain, air: air.gain },
     };
-    for (const name of ["gravel", "clatter", "chirp", "bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear", "fanfare", "chime-bronze", "chime-silver", "chime-gold", "victory", "growth", "hatch", "crack"]) bank(name);
+    for (const name of ["gravel", "clatter", "chirp", "bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear", "fanfare", "chime-bronze", "chime-silver", "chime-gold", "victory", "growth", "hatch", "crack", "slap", "creak", "plops", "counter"]) bank(name);
     bank("white");
     bank("brown");
     return true;
@@ -840,6 +846,16 @@ export function createSound() {
       // (Under water dulled, and played louder by about what the surface takes from it.)
       play(pick(bank("crack")), nodes.air, MIX.crack * near * (1 + 5 * submerged), undefined, random(0.9, 1.1));
     },
+    // Bread thrown from the bridge, landing `distance` away: a few small plops.
+    plops(distance = 10) {
+      if (!ready() || distance > 45) return;
+      play(pick(bank("plops")), nodes.surface, MIX.plops * (1 + 2 * submerged) * (1 - distance / 45), undefined, random(0.9, 1.1));
+    },
+    // The fish counter at the weir taking the fish's picture: a relay's click, a whirr.
+    counter() {
+      if (!ready()) return;
+      play(bank("counter")[0], nodes.surface, MIX.counter, undefined, random(0.97, 1.03));
+    },
     // Otters at play: quick, high chirps and squeaks.
     otter() {
       if (!ready()) return;
@@ -1080,6 +1096,16 @@ export function createSound() {
       if (clock > nextChirp) {
         nextChirp = clock + random(6, 15);
         if (ice > 0.5 && submerged > 0.5 && wanted()) play(pick(bank("chirp")), nodes.ambience, MIX.chirp * random(0.6, 1), now + 0.02, random(0.85, 1.15), 0, true);
+      }
+      // The mill wheel near by: its paddles slapping into the race a little under once a
+      // second, its axle creaking now and then (from above the water, muffled under it).
+      if (mill > 0.01 && clock > nextSlap) {
+        nextSlap = clock + (1 / 0.86) * random(0.9, 1.1);
+        if (wanted()) play(pick(bank("slap")), nodes.surface, MIX.slap * mill * mill, now + 0.02, random(0.93, 1.07), 0, true);
+        if (clock > nextCreak) {
+          nextCreak = clock + random(5, 12);
+          if (wanted()) play(pick(bank("creak")), nodes.surface, MIX.creak * mill * mill, now + random(0.1, 0.5), random(0.9, 1.1), 0, true);
+        }
       }
       // Gravel ticking along the bed of a brook, the more the harder it runs and the nearer
       // the bed the fish is.

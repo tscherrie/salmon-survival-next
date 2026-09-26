@@ -387,7 +387,8 @@ export function* makeAll(raw) {
   raw.bubble = many(24, makeBubble);
   yield;
   for (const kind of KNOCKS) {
-    raw[kind] = many(3, () => makeKnock(kind));
+    // (The floe's knock rings long and low: two of them, at half the rate.)
+    raw[kind] = kind === "ice" ? many(2, () => half(makeKnock(kind))) : many(3, () => makeKnock(kind));
     yield;
   }
   raw.nip = many(4, makeNip);

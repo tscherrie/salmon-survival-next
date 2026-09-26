@@ -58,15 +58,15 @@ export function makeGravel() {
 }
 // Rain heard from under the water: each drop striking the surface rings a small bubble,
 // a ping at 6.5-14 kHz (most at 9-12) gone in a few milliseconds, some 500 of them a second
-// at full rain, over a faint hiss high up. 3 s, looped.
+// at full rain, over a faint hiss high up. 2 s, looped.
 export function makeRainPings() {
-  return looped(3, 2, (l, r) => {
-    const count = Math.round(3.12 * 500);
+  return looped(2, 2, (l, r) => {
+    const count = Math.round(2.12 * 500);
     for (let k = 0; k < count; k++) {
       const u = Math.random();
       const f = u < 0.7 ? random(9000, 12000) : u < 0.85 ? random(6500, 9000) : random(12000, 14000);
       const a = Math.random();
-      ping(l, r, Math.random() * 3.1, f, random(0.0015, 0.005), 0.5 * a * a, random(-0.9, 0.9));
+      ping(l, r, Math.random() * 2.1, f, random(0.0015, 0.005), 0.5 * a * a, random(-0.9, 0.9));
     }
     const top = biquad("bandpass", 11300, 1.4),
       top2 = biquad("bandpass", 11300, 1.4);
@@ -204,11 +204,17 @@ export function makeCreak() {
   hiss(d, 0.05, "bandpass", 900, 2, 0.15, 0.08, 0.2);
   return [fadeOut(d)];
 }
-// Bread dropping from the bridge: a small plop, a ring falling in pitch, and a bubble.
-export function makePlop() {
-  const d = mono(0.2);
-  ring(d, 0, random(1000, 2500), 0.015, 0.7, 0.7);
-  ring(d, 0.02, random(500, 800), 0.02, 0.2, 1.4);
+// Bread dropping from the bridge: 3-6 small plops over a second or so, each a ring falling
+// in pitch and a bubble.
+export function makePlops() {
+  const d = mono(1.6);
+  const n = 3 + Math.floor(Math.random() * 4);
+  for (let k = 0; k < n; k++) {
+    const at = random(0, 1.3),
+      a = random(0.5, 1);
+    ring(d, at, random(1000, 2500), 0.015, 0.7 * a, 0.7);
+    ring(d, at + 0.02, random(500, 800), 0.02, 0.2 * a, 1.4);
+  }
   return [fadeOut(d)];
 }
 // The fish counter at the weir: a relay clicking over, then the camera's motor whirring up
@@ -249,7 +255,7 @@ export function* makeWorld(raw) {
   raw.crack = many(3, makeCrack, false);
   raw.slap = many(3, makeSlap);
   raw.creak = many(2, makeCreak);
-  raw.plop = many(4, makePlop);
+  raw.plops = many(2, makePlops);
   raw.counter = many(1, makeCounter);
   yield;
 }

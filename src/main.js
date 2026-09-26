@@ -11,7 +11,7 @@ import { renderSettings } from "./render/policy.js";
 import { createDaylight } from "./daylight.js";
 import { framebufferSize, qualityName } from "../../shared/render-policy.js";
 import { reportSceneError } from "../../shared/controls.js";
-import { COURSE_VERSION, FALLS, MOUTH, REDD, S, TRIBUTARIES, bed, coolingAt, frame, gusts, level, locate, passSlot, place, poolAt, regionName, regionWeights, relaid, section, setSeasonFlow, driftRich } from "./course.js";
+import { COURSE_VERSION, FALLS, MILLS, MOUTH, REDD, S, TRIBUTARIES, bed, coolingAt, frame, gusts, level, locate, passSlot, place, poolAt, regionName, regionWeights, relaid, section, setSeasonFlow, driftRich } from "./course.js";
 import { createFlowField } from "./flowfield.js";
 import { createMirror, createWindow } from "./render/mirror.js";
 import { createBedMaterial, createRockMaterials, createSky, photoTextures, photosLoaded, createSurfaceMaterial,skyUniforms, surfaceUniforms } from "./materials.js";
@@ -1644,6 +1644,16 @@ async function start() {
   const heldPosition = new THREE.Vector3();
   const heldHeading = new THREE.Vector3();
 
+  // Food thrown in by the world (bread from the bridge): where the bread last landed, for
+  // its plops.
+  const breadAt = { x: 0, z: 0 };
+  const tossFood = (type, x, z) => {
+    if (type === "bread") (breadAt.x = x), (breadAt.z = z);
+    return life.food.toss(type, x, z, fish);
+  };
+  // The mill wheel's place (course.js; the wheel itself is built by features.js), for its
+  // sound.
+  const millAt = MILLS[0] ? place(MILLS[0].wheel, section(MILLS[0].wheel).thalweg + MILLS[0].side * (section(MILLS[0].wheel).half + MILLS[0].offset), {}) : null;
   // A blow landed in a fight: felt, heard and shown; and a won fight celebrated.
   let lastFoe = null;
   let foeHit = false;
@@ -1691,8 +1701,9 @@ async function start() {
     terrain.update(viewer, { radius: builtRadius(), near: clamp(0.28 + L * 0.1, 0.35, 1), budget: 5, land: 60 });
     prof.mark("terrain");
     featureEvents.length = 0;
-    features.update(fish.river.s, 3, { dt, time, fish, light: conditions.light, toss: (type, x, z) => life.food.toss(type, x, z, fish), events: featureEvents });
+    features.update(fish.river.s, 3, { dt, time, fish, light: conditions.light, toss: tossFood, events: featureEvents });
     prof.mark("features");
+    if (featureEvents.includes("bread")) sound.plops(Math.hypot(breadAt.x - fish.position.x, breadAt.z - fish.position.z));
     if (featureEvents.includes("bread")) hud.tip("bread", "<b>Brot!</b> Leute auf der Brücke werfen Brotkrumen ins Wasser. Schnell hin – sie treiben an der Oberfläche.", 8);
     // The mill wheel's paddles: a knock, and the water throws the fish on.
     const struck = dead <= 0 && !fish.airborne ? features.hazard(fish, time) : null;
@@ -1731,6 +1742,7 @@ async function start() {
         localStorage.setItem("salmon-survival-counted", String(n));
       } catch {}
       hud.toast("Gezählt!", `Lachs Nr. ${n} – die Kamera der Zählstation hat dich erfasst (${MONTHS[conditions.month]}).`, 6);
+      sound.counter();
       feat("counted", { delay: 2 });
     }
     counterLast = fish.river.s;
@@ -2609,6 +2621,7 @@ async function start() {
     soundState.flood = Math.max(events.flood, 0.5 * conditions.flood) * (1 - soundState.sea);
     // (The heart beats for strength running out -- not while the fish is safe or dead.)
     soundState.energy = dead > 0 || fish.safe || celebration.active ? 1 : fish.energy;
+    soundState.mill = millAt ? clamp(1 - Math.hypot(fish.position.x - millAt.x, fish.position.z - millAt.z) / 60, 0, 1) : 0;
     // Home: its scent on the way, and the redd itself while the hen is courted.
     soundState.home = redd.on && !spawning ? 0.5 + 0.5 * redd.state.courtship : homeScent;
     soundState.breath = fish.breath;

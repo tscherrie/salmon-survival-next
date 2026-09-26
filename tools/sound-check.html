@@ -217,6 +217,11 @@
     shot("snap", (s) => s.snap()),
     shot("thunder_near", (s) => s.thunder(1)),
     shot("lightning_near", (s) => s.lightning?.(1)),
+    // Above the water, heard from under it: the mill wheel near by from 4 s on, bread, the
+    // fish counter.
+    { name: "mill", kind: "shot", seconds: 12, params: (t) => ({ mill: t >= 4 ? 1 : 0 }), measure: (m) => ({ slaps: m.onsets(4, 12, 800, 2000, 4, 0.5) }) },
+    shot("bread", (s) => s.plops?.(5)),
+    shot("counter", (s) => s.counter?.()),
     { ...shot("storm_swell", (s) => s.storm?.()), seconds: 12, measure: (m) => ({ d400: m.loudest(4, 11.5, 0.4) - m.loudest(2.5, 4, 0.4), early: m.spectrum(4.5, 6).centroid, late: m.spectrum(6.5, 7.9).centroid }) },
     shot("thunder_far", (s) => s.thunder(0.1)),
     shot("eaten_fish", (s) => s.eaten("fish")),

@@ -327,14 +327,13 @@ export function makeGrowth() {
   return [fadeOut(d, 0.05)];
 }
 // A new generation hatched: one clear bell, C6, its partials as a real bell's (1, 2.76,
-// 5.4, 8.9), ringing long.
+// 5.4), ringing long.
 export function makeHatch() {
   const d = mono(3);
   note(d, null, 0, 1046.5, 2.9, [
     [1, 0.2],
     [2.76, 0.08],
-    [5.4, 0.04],
-    [8.9, 0.02],
+    [5.4, 0.05],
   ]);
   return [fadeOut(d, 0.2)];
 }
@@ -376,6 +375,6 @@ export function* makeCues(raw) {
   raw.victory = many(1, makeVictory);
   raw.growth = many(1, makeGrowth);
   yield;
-  raw.hatch = many(1, makeHatch, false);
+  raw.hatch = many(1, makeHatch);
   yield;
 }
