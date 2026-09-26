@@ -4,7 +4,9 @@
 //   node tools/sound-check.mjs [--only bed_river,nip] [--wav <folder>] [--json <file>]
 //
 // --wav keeps each scene as a .wav to listen to (or to measure with other tools). Exits 1
-// if a check fails. No dependencies: Node's own http, and Chrome.
+// if a check fails (the checks are below the tables: loudness of the beds, cues heard on a
+// phone, placing, the parts of the river told apart, silence when muted or hushed, no
+// clipping, voices and nodes bounded). No dependencies: Node's own http, and Chrome.
 
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";

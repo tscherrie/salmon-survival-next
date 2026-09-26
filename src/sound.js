@@ -22,7 +22,11 @@
 //
 // The noise and the short sounds heard often (bubbles, splashes, knocks) are made ahead as
 // plain samples, a slice at a time while the game loads, and played back as they are: a
-// source and a level each, instead of a tangle of oscillators and filters every time.
+// source and a level each, instead of a tangle of oscillators and filters every time
+// (src/sound-make.js; the cues -- what the fish does, hunters, stingers -- in
+// src/sound-cues.js; the world's small sounds in src/sound-world.js). What sounds now and
+// then under water (bubbles, gravel, a flood's clatter, ice singing, a ship, the heart) is
+// scheduled by update() from the world round the fish; the rest is played when it happens.
 
 import { RATE, random, pick, makeBurst, KNOCKS, makeBlup, makeSplash, makeSwallow, createWorkshop, makeAll, step, stepSize } from "./sound-make.js";
 import { makeCues } from "./sound-cues.js";
@@ -72,7 +76,6 @@ const MIX = {
   blup: 0.7,
   knock: 1.0,
   rise: 1.0,
-  call: 0.32,
   otter: 0.38,
   thunder: 2.2,
   whump: 0.4,
@@ -333,7 +336,7 @@ export function createSound() {
     loop(bank("gills")[0]).connect(gillsGain).connect(body);
     // A ship passing far off at sea now and then (see update()): its drone, placed.
     const shipGain = amp(0);
-    const shipPan = context.createStereoPanner ? panner(0) : null;
+    const shipPan = panner(0);
     const shipSource = loop(bank("ship")[0], 0);
     shipSource.connect(shipGain);
     (shipPan ? shipGain.connect(shipPan) : shipGain).connect(ambience);
@@ -392,7 +395,7 @@ export function createSound() {
       source.connect(band).connect(level);
       if (pan) level.connect(pan).connect(ambience);
       else level.connect(ambience);
-      gurgles.push({ band, level, base: 220 + i * 140 });
+      gurgles.push({ band, level });
     }
     // Rain on the surface; and under it, the patter of the drops come down through the
     // water, a fine hiss of its own.
@@ -677,7 +680,7 @@ export function createSound() {
       }
     },
     // A knock of some kind: "body" (a blow in a fight, a hunter's bite), "rock", "wood" (the
-    // mill wheel, a branch), "net", "hook". `strength` 0..1.5.
+    // mill wheel, a branch), "net", "hook", "ice" (up against a floe). `strength` 0..1.5.
     thump(kind = "body", strength = 1) {
       if (!ready()) return;
       // (Pressed up under a floe, the knock would come every frame.)
