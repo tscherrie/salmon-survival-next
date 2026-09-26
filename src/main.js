@@ -1633,6 +1633,7 @@ async function start() {
     sound.warn(list, dead <= 0 && !fish.captive);
   }
   let veiled = false;
+  let deadHushed = false;
   const lastPlace = fish.position.clone();
   const heldPosition = new THREE.Vector3();
   const heldHeading = new THREE.Vector3();
@@ -1660,7 +1661,7 @@ async function start() {
       brood.won();
       if (hit.kind !== "rival") {
         hud.toast(`${hit.title} besiegt!`, "Sie flieht – und lässt dich von jetzt an in Ruhe.", 5);
-        sound.fanfare();
+        sound.victory();
       }
       logbook.victory(hit.kind);
       return;
@@ -2081,6 +2082,11 @@ async function start() {
       if (!veiled && DEATH - dead > (held.active ? 1.9 : 0)) {
         veiled = true;
         hud.veil("dark");
+      }
+      // The sound goes quiet with it -- or, where nothing caught the fish, once the swell
+      // closing over its death has been heard.
+      if (!deadHushed && DEATH - dead > (held.active ? 1.9 : 3)) {
+        deadHushed = true;
         sound.hush(true, "dead");
       }
       if (dead <= 0 && !lifecard.open) handover();
@@ -2222,11 +2228,12 @@ async function start() {
   function die(cause) {
     track("death", { cause, stage: STAGES[fish.stage].id });
     dead = DEATH;
-    veiled = false;
+    veiled = deadHushed = false;
     carded = false;
     deathInfo = { cause, stageName: STAGES[fish.stage].name, stageId: STAGES[fish.stage].id, progress: fish.progress, region: regionName(fish.river.s), month: MONTHS[conditions.month] };
     const held = life.hunters.captive;
     if (held.active) sound.eaten(held.kind);
+    else sound.ending();
     sound.charge(-1);
     hud.toast(cause, "", 3);
     endDrive("died");
@@ -2276,6 +2283,7 @@ async function start() {
     dead = 0;
     hud.veil(null);
     sound.hush(false, "dead");
+    sound.veil(false);
     hud.toast("", broodWord("takeover"), 4);
     persist();
   }
@@ -2346,6 +2354,7 @@ async function start() {
     pebbles.prime(fish.position, fish.length, fish.river.s);
     hud.veil(null);
     sound.hush(false, "dead");
+    sound.veil(false);
     showBrood();
     persist();
   }
@@ -2365,6 +2374,7 @@ async function start() {
     pebbles.prime(fish.position, fish.length, fish.river.s);
     hud.veil(null);
     sound.hush(false, "dead");
+    sound.veil(false);
     persist();
   }
   // Spawning: the fish settles over the gravel of the redd, and the eggs go down among the
@@ -2396,6 +2406,7 @@ async function start() {
     spawning = { t: 0, laid: 0, traits: earned(brood.life) };
     if (redd.on) redd.spawn(fish);
     sound.hush(false, "dead");
+    sound.spawn();
   }
   function stepSpawning(dt) {
     if (!spawning) return;
@@ -2407,6 +2418,8 @@ async function start() {
     if (t > 4 && !spawning.veiled) {
       spawning.veiled = true;
       hud.veil("white");
+      // Silence under the white (the bells can still ring into it).
+      sound.veil(true);
       hud.toast("Gelaicht", "Im Kies der Quelle liegt die nächste Generation.");
     }
     // Home: the card of the life that came back, before the next generation begins.
@@ -2440,6 +2453,8 @@ async function start() {
     life.reset(fish);
     pebbles.prime(fish.position, fish.length, fish.river.s);
     hud.veil(null);
+    sound.veil(false);
+    sound.hatch();
     hud.toast(STAGES[0].name, `Generation ${save.generation + 1}`);
     feat("generation", { delay: 3 });
     persist();

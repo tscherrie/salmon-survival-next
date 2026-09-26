@@ -121,12 +121,15 @@ export function makeChirp() {
 export function makeShip() {
   return looped(4, 1, (d) => {
     const band = biquad("bandpass", 520, 0.9);
-    const parts = [1, 0.6, 0.4, 0.3, 0.2];
+    // (One turn of the drone, looked up by phase.)
+    const turn = new Float32Array(2048);
+    [1, 0.6, 0.4, 0.3, 0.2].forEach((a, n) => {
+      for (let i = 0; i < turn.length; i++) turn[i] += a * Math.sin((2 * Math.PI * (n + 1) * i) / turn.length);
+    });
     for (let i = 0; i < d.length; i++) {
       const t = i / RATE;
       const throb = 0.55 + 0.45 * Math.sin(2 * Math.PI * 3.75 * t);
-      let v = 0;
-      for (let n = 0; n < parts.length; n++) v += parts[n] * Math.sin(2 * Math.PI * 44 * (n + 1) * t);
+      const v = turn[Math.floor(((44 * t) % 1) * turn.length)];
       d[i] = 0.25 * v * (0.8 + 0.2 * throb) + 0.35 * throb * throb * band.run(white());
     }
   }, 0);

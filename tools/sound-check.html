@@ -263,6 +263,25 @@
     ...["kingfisher", "heron", "merganser", "seal", "bear"].map((kind) => ({ ...shot(`call_${kind}`, (s) => s.call(kind)), measure: (m) => ({ mid: m.band(4, 5.5, 500, 1500) - m.band(2.5, 4, 500, 1500) }) })),
     { name: "bed_winded", kind: "bed", params: { winded: true, breath: 0.05 }, measure: (m) => ({ gills: m.band(3, 8, 500, 1500), pulse: m.period(3, 8, 500, 1500, 0.1, 0.2, 0.01) }) },
     shot("chime_gold", (s) => s.chime("gold")),
+    // The stages of a life: a beaten hunter, growing, hatching, a death with no captor.
+    shot("victory", (s) => s.victory?.()),
+    shot("growth", (s) => s.growth?.()),
+    shot("hatch", (s) => s.hatch?.()),
+    { ...shot("ending", (s) => s.ending?.()), measure: (m) => ({ swell: m.loud(4.3, 6.3) - m.loud(2, 4) }) },
+    // Spawning: the pad and the calm heart from 4 s, silence under the veil from 8 s, the
+    // world back and the hatch bell at 13 s.
+    {
+      name: "spawn_veil",
+      kind: "shot",
+      seconds: 16,
+      params: {},
+      events: [
+        [4, (s) => s.spawn?.()],
+        [8, (s) => s.veil?.(true)],
+        [13, (s) => (s.veil?.(false), s.hatch?.())],
+      ],
+      measure: (m) => ({ pad: m.band(4.5, 7.5, 200, 700) - m.band(2.5, 4, 200, 700), veiled: m.loud(9.5, 12.5), hatch: m.loudestPhone(13, 15, 0.05) - m.loudestPhone(2.5, 4, 0.05) }),
+    },
     solo("solo_splash_L0.3", (s) => s.splash(1, 0.3)),
     solo("solo_splash_L1", (s) => s.splash(1, 1)),
     solo("solo_splash_L3", (s) => s.splash(1, 3)),

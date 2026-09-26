@@ -207,6 +207,16 @@ if (get("bed_flood")?.extra && get("bed_roar_near")) check(`bed_flood clatters a
 if (get("floe_knock")) check(`floe_knock ≥ +6 dB over the bed on a phone: ${get("floe_knock").dPhone}`, get("floe_knock").dPhone >= 6);
 // The river's small sounds: heard, but under the bed (400 ms loudness up by +0.3 to +4 dB).
 for (const name of ["ice_chirp"]) if (get(name)) check(`${name} heard but in the ambience (Δ400ms ${get(name).d400}, +0.3..+4)`, get(name).d400 >= 0.3 && get(name).d400 <= 4);
+// The stages of a life: heard on a phone, each in a few nodes; a beaten hunter not the
+// stage fanfare; spawning goes silent under its veil and the new generation rings in.
+for (const [name, least] of [["fanfare", 9], ["chime_gold", 9], ["victory", 6], ["growth", 6], ["hatch", 6]])
+  if (get(name)) check(`${name} ≥ +${least} dB over the bed on a phone (${get(name).dPhone}) in at most 6 nodes (${get(name).shotNodes})`, get(name).dPhone >= least && get(name).shotNodes <= 6);
+if (get("victory") && get("fanfare")) check(`victory its own (centroid ${get("victory").centroid} against the fanfare's ${get("fanfare").centroid})`, Math.abs(get("victory").centroid - get("fanfare").centroid) / get("fanfare").centroid >= 0.2);
+if (get("ending")?.extra) check(`ending: a closing swell heard for 2 s (+${get("ending").extra.swell} dB) in at most 6 nodes (${get("ending").shotNodes})`, get("ending").extra.swell >= 2 && get("ending").shotNodes <= 6);
+if (get("spawn_veil")?.extra) {
+  const e = get("spawn_veil").extra;
+  check(`spawn_veil: the pad heard (+${e.pad} dB at 200-700 Hz), silent under the veil (${e.veiled} LUFS ≤ -55), the hatch bell rings (+${e.hatch} dB on a phone)`, e.pad >= 1.5 && e.veiled <= -55 && e.hatch >= 6);
+}
 // Nothing clips: the limiter holds every scene's peaks under full scale.
 const peaky = results.filter((r) => r.peak > -1);
 check(`every scene's peak ≤ -1 dBFS: ${peaky.length ? peaky.map((r) => `${r.name} ${r.peak}`).join(", ") : `loudest ${Math.max(...results.map((r) => r.peak))}`}`, !peaky.length);

@@ -65,18 +65,18 @@ export function makeTick() {
   ring(d, 0, random(3250, 3350), 0.006, 0.3);
   return [fadeOut(d, 0.01)];
 }
-// A bell of a few partials (1, 2.01, 3.02 of `f`), added at `at`.
-export function bell(data, at, f, tau, amp, partials = [1, 0.3, 0.1]) {
-  const ratios = [1, 2.01, 3.02, 4.1];
-  partials.forEach((a, i) => ring(data, at, f * ratios[i], tau / (1 + 0.6 * i), amp * a));
-}
 // A fall cleared: three quick bell notes up, G5 C6 E6 -- small and bright, not the stage
 // fanfare.
 export function makeCleared() {
   const d = mono(0.8);
-  bell(d, 0, 783.99, 0.18, 0.5);
-  bell(d, 0.06, 1046.5, 0.18, 0.5);
-  bell(d, 0.12, 1318.5, 0.3, 0.55);
+  const partials = [
+    [1, 0.5],
+    [2.01, 0.15],
+    [3.02, 0.05],
+  ];
+  note(d, null, 0, 783.99, 0.9, partials);
+  note(d, null, 0.06, 1046.5, 0.9, partials);
+  note(d, null, 0.12, 1318.5, 1.5, partials);
   return [fadeOut(d, 0.1)];
 }
 
@@ -158,9 +158,8 @@ export function makeHeron() {
   let phase = 0;
   for (let i = 0; i < length * RATE; i++) {
     const t = i / RATE;
-    phase += (2 * Math.PI * 300 * Math.pow(0.6, Math.min(1, t / 0.4))) / RATE;
-    let v = 0;
-    for (let n = 1; n <= 12; n++) v += Math.sin(n * phase) / n;
+    phase += (300 * Math.pow(0.6, Math.min(1, t / 0.4))) / RATE;
+    let v = HERON(phase);
     v *= 1 - 0.5 * (0.5 + 0.5 * Math.sin(2 * Math.PI * 60 * t)) + 0.08 * white();
     v *= Math.min(1, t / 0.02) * Math.min(1, (length - t) / 0.08);
     d[i] = 0.35 * v + throat.run(v);
@@ -207,22 +206,147 @@ export function makeBear() {
   const start = Math.floor(0.5 * RATE);
   for (let i = 0; i < 0.32 * RATE; i++) {
     const t = i / RATE;
-    phase += (2 * Math.PI * f * (1 - 0.15 * t)) / RATE;
-    let v = 0;
-    for (let n = 1; n <= 10; n++) v += Math.sin(n * phase) / n;
+    phase += (f * (1 - 0.15 * t)) / RATE;
+    const v = GROWL(phase);
     d[start + i] += 0.5 * v * (0.6 + 0.4 * Math.sin(2 * Math.PI * 25 * t)) * Math.min(1, t / 0.03) * Math.min(1, (0.32 - t) / 0.1);
   }
   return [normalize(fadeOut(d))];
+}
+
+// ---- The stingers: the stages of a life.
+
+// A bell's note into a pair of channels at `pan`: partials [ratio, level], rising in 12 ms
+// and dying away over `hold` seconds (to about a five-hundredth).
+// (Each partial a damped sine made by a two-pole resonator: no sine or exponential per
+// sample, which kept a fanfare's making at a tenth.)
+function note(left, right, at, f, hold, partials, pan = 0) {
+  const x = ((pan + 1) / 4) * Math.PI;
+  const gl = right ? Math.cos(x) : 1,
+    gr = Math.sin(x);
+  const start = Math.floor(at * RATE);
+  const n = Math.min(left.length - start, Math.ceil((hold + 0.05) * RATE));
+  const rise = Math.floor(0.012 * RATE);
+  for (const [ratio, level] of partials) {
+    const w = (2 * Math.PI * f * ratio) / RATE,
+      r = Math.exp(-6.3 / (hold * RATE));
+    const c = 2 * r * Math.cos(w),
+      r2 = r * r;
+    let y1 = level * Math.sin(w),
+      y2 = 0;
+    for (let i = 0; i < n; i++) {
+      const v = i < rise ? (y1 * i) / rise : y1;
+      left[start + i] += v * gl;
+      if (right) right[start + i] += v * gr;
+      const y = c * y1 - r2 * y2;
+      y2 = y1;
+      y1 = y;
+    }
+  }
+}
+// One turn of a tone made of overtones (`parts[n]` the level of the n+1-th), looked up by
+// phase: far quicker than adding the sines each sample.
+function wave(parts, size = 4096) {
+  const table = new Float32Array(size + 1);
+  for (let i = 0; i <= size; i++) for (let n = 0; n < parts.length; n++) table[i] += parts[n] * Math.sin((2 * Math.PI * (n + 1) * i) / size);
+  return (phase) => table[Math.floor((phase - Math.floor(phase)) * size)];
+}
+const HERON = wave(Array.from({ length: 12 }, (_, n) => 1 / (n + 1)));
+const GROWL = wave(Array.from({ length: 10 }, (_, n) => 1 / (n + 1)));
+const BRASS = wave(Array.from({ length: 6 }, (_, n) => 1 / (n + 1)));
+// A new stage of life: a soft swell of noise sweeping up under a rising run of bell tones,
+// C E G C E, the last held, spread from left to right.
+export function makeFanfare() {
+  const l = mono(3),
+    r = mono(3);
+  const band = biquad("bandpass", 300, 0.7),
+    band2 = biquad("bandpass", 300, 0.7);
+  for (let i = 0; i < 2.8 * RATE; i++) {
+    const t = i / RATE;
+    if ((i & 31) === 0) {
+      const f = 300 * Math.pow(6, Math.min(1, t / 1.6));
+      band.set(f, 0.7);
+      band2.set(f, 0.7);
+    }
+    const e = 0.12 * (t < 0.5 ? t / 0.5 : Math.exp(-(t - 0.5) / 0.28));
+    l[i] += 0.5 * e * band.run(white());
+    r[i] += 0.5 * e * band2.run(white());
+  }
+  const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+  notes.forEach((f, i) =>
+    note(l, r, 0.12 + i * 0.13, f, i === notes.length - 1 ? 2.2 : 0.9, [
+      [1, 0.16],
+      [2.01, 0.05],
+      [3.02, 0.018],
+    ], (i / (notes.length - 1)) * 0.8 - 0.4),
+  );
+  return [fadeOut(l, 0.1), fadeOut(r, 0.1)];
+}
+// A badge: two or three quick bell tones up, three and brighter for a gold one.
+export function makeChime(tier) {
+  const notes = tier === "gold" ? [783.99, 1046.5, 1567.98] : tier === "silver" ? [659.25, 987.77] : [587.33, 880];
+  const d = mono(0.09 * notes.length + 1.2);
+  notes.forEach((f, i) =>
+    note(d, null, i * 0.09, f, i === notes.length - 1 ? 1.1 : 0.45, [
+      [1, 0.12],
+      [2.01, 0.035],
+    ]),
+  );
+  return [fadeOut(d, 0.05)];
+}
+// A hunter beaten: a low drum and a rising fifth in a brassy tone (all its overtones), with
+// a bright tick -- a win, not a new stage of life.
+export function makeVictory() {
+  const d = mono(1.4);
+  ring(d, 0, 100, 0.2, 0.7, 0.8);
+  hiss(d, 0, "lowpass", 400, 0.7, 0.05, 0.5, 0.003);
+  ring(d, 0, random(2300, 2500), 0.006, 0.3);
+  for (const [at, f, hold] of [
+    [0.08, 329.63, 0.35],
+    [0.34, 440, 0.9],
+  ]) {
+    const start = Math.floor(at * RATE);
+    for (let i = 0; i < (hold + 0.1) * RATE && start + i < d.length; i++) {
+      const t = i / RATE;
+      const e = Math.min(1, t / 0.03) * (t < hold ? 1 - 0.3 * (t / hold) : 0.7 * Math.exp(-(t - hold) / 0.05));
+      d[start + i] += 0.12 * e * BRASS((f * i) / RATE);
+    }
+  }
+  return [fadeOut(d, 0.08)];
+}
+// Grown a quarter of the way through a stage: two soft bell notes up, E5 and A5.
+export function makeGrowth() {
+  const d = mono(0.8);
+  note(d, null, 0, 659.25, 0.4, [
+    [1, 0.12],
+    [2.01, 0.03],
+  ]);
+  note(d, null, 0.14, 880, 0.6, [
+    [1, 0.12],
+    [2.01, 0.03],
+  ]);
+  return [fadeOut(d, 0.05)];
+}
+// A new generation hatched: one clear bell, C6, its partials as a real bell's (1, 2.76,
+// 5.4, 8.9), ringing long.
+export function makeHatch() {
+  const d = mono(3);
+  note(d, null, 0, 1046.5, 2.9, [
+    [1, 0.2],
+    [2.76, 0.08],
+    [5.4, 0.04],
+    [8.9, 0.02],
+  ]);
+  return [fadeOut(d, 0.2)];
 }
 
 // All of them, a slice at a time (see createWorkshop in src/sound-make.js).
 export function* makeCues(raw) {
   // (Everything but the highest at half the rate: see half() in src/sound-make.js.)
   const many = (count, make, low = true) => Array.from({ length: count }, () => (low ? half(make()) : make()));
-  raw.whump = many(3, makeWhump);
+  raw.whump = many(2, makeWhump);
   raw.jaws = many(4, makeJaws);
   yield;
-  raw.denied = many(3, () => makeDenied());
+  raw.denied = many(2, () => makeDenied());
   raw.thud = many(2, () => makeDenied(0.7));
   raw.gasp = many(2, makeGasp);
   yield;
@@ -231,8 +355,8 @@ export function* makeCues(raw) {
   raw.tick = many(2, makeTick);
   raw.cleared = many(1, makeCleared);
   yield;
-  raw.swell = many(3, makeSwell);
-  raw.pulse = many(3, makePulse);
+  raw.swell = many(2, makeSwell);
+  raw.pulse = many(2, makePulse);
   raw.coil = many(2, makeCoil);
   yield;
   raw.heart = many(2, makeHeart);
@@ -245,5 +369,13 @@ export function* makeCues(raw) {
   yield;
   raw.sealMoan = many(1, makeSealMoan);
   raw.bear = many(2, makeBear);
+  yield;
+  raw.fanfare = many(1, makeFanfare);
+  yield;
+  for (const tier of ["bronze", "silver", "gold"]) raw[`chime-${tier}`] = many(1, () => makeChime(tier));
+  raw.victory = many(1, makeVictory);
+  raw.growth = many(1, makeGrowth);
+  yield;
+  raw.hatch = many(1, makeHatch, false);
   yield;
 }

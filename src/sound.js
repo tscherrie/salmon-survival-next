@@ -91,6 +91,13 @@ const MIX = {
   snap: 0.8,
   moan: 0.25,
   heart: 0.5,
+  fanfare: 0.55,
+  chime: 0.55,
+  victory: 0.2,
+  growth: 0.6,
+  hatch: 0.35,
+  pad: 0.05,
+  ending: 0.6,
 };
 // The leap's sweet spot (main.js: a leap released above this on the swing clears the fall).
 const SWEET = 0.82;
@@ -133,6 +140,8 @@ export function createSound() {
     clearTone = 7000,
     // The heart: beating until then (by the frame clock), how fast, when the next beat is.
     heartUntil = -1,
+    // Spawning: when the heart began to calm (by the frame clock).
+    calmFrom = -1e9,
     bpm = 64,
     nextBeat = 0,
     beating = false,
@@ -405,7 +414,7 @@ export function createSound() {
       // Moved only when the ear crosses the surface, at the pace of the crossing.
       crossing: { pingsUnder: pingsUnder.gain, waterDuck: waterDuck.gain, dry: dry.gain, wet: wet.gain, airOpen: airOpen.gain, surface: surface.gain, air: air.gain },
     };
-    for (const name of ["gravel", "clatter", "chirp", "bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear"]) bank(name);
+    for (const name of ["gravel", "clatter", "chirp", "bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear", "fanfare", "chime-bronze", "chime-silver", "chime-gold", "victory", "growth", "hatch"]) bank(name);
     bank("white");
     bank("brown");
     return true;
@@ -568,7 +577,7 @@ export function createSound() {
     },
     // What it is doing (for the diagnostics): the device's state and the sounds playing.
     get stats() {
-      return { state: context?.state ?? "none", time: context?.currentTime ?? 0, live, peakLive, nodes: made, bytes, making: workshop.left, madeMs: workshop.spent, asleep, level, hushes: [...hushes], sleepIn: (sleepAt - performance.now()) / 1000 };
+      return { state: context?.state ?? "none", time: context?.currentTime ?? 0, live, peakLive, nodes: made, bytes, making: workshop.left, madeMs: workshop.spent, world: nodes?.world.gain.value ?? 1, asleep, level, hushes: [...hushes], sleepIn: (sleepAt - performance.now()) / 1000 };
     },
     // For extensions (src/mods.js): the context and the groups to play into, while the
     // sound is on and running, else null. What plays into a group goes through the master,
@@ -691,49 +700,7 @@ export function createSound() {
     fanfare() {
       if (!ready()) return;
       const at = context.currentTime + 0.05;
-      const bus = amp(0.55);
-      bus.connect(nodes.ui);
-      // The swell under it.
-      const swell = bufferSource(bank("white")[0]);
-      const band = filter("bandpass", 600, 0.7);
-      const swellGain = amp(0);
-      swellGain.gain.setValueAtTime(0, at);
-      swellGain.gain.linearRampToValueAtTime(0.12, at + 0.5);
-      swellGain.gain.exponentialRampToValueAtTime(0.0005, at + 2.6);
-      band.frequency.setValueAtTime(300, at);
-      band.frequency.exponentialRampToValueAtTime(1800, at + 1.6);
-      swell.connect(band).connect(swellGain).connect(bus);
-      swell.start(at, Math.random() * 2);
-      swell.stop(at + 2.8);
-      voice(swell, swellGain);
-      // The bells: a major arpeggio up an octave and a half, the last held.
-      const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
-      notes.forEach((f, i) => {
-        const t0 = at + 0.12 + i * 0.13;
-        const hold = i === notes.length - 1 ? 2.2 : 0.9;
-        let out = bus;
-        const p = panner((i / (notes.length - 1)) * 0.8 - 0.4);
-        if (p) {
-          p.connect(bus);
-          out = p;
-        }
-        for (const [ratio, level] of [
-          [1, 0.16],
-          [2.01, 0.05],
-          [3.02, 0.018],
-        ]) {
-          const osc = oscillator();
-          const env = amp(0);
-          osc.frequency.value = f * ratio;
-          env.gain.setValueAtTime(0, t0);
-          env.gain.linearRampToValueAtTime(level, t0 + 0.012);
-          env.gain.exponentialRampToValueAtTime(0.0003, t0 + hold);
-          osc.connect(env).connect(out);
-          osc.start(t0);
-          osc.stop(t0 + hold + 0.05);
-          voice(osc, env);
-        }
-      });
+      play(pick(bank("fanfare")), nodes.ui, MIX.fanfare, at);
       bubbles(14, 1.4, 1.2, 0.8, at + 0.2);
     },
     // A badge: two or three quick bell tones up (three and brighter for a gold one), and a
@@ -741,29 +708,85 @@ export function createSound() {
     chime(tier = "bronze") {
       if (!ready()) return;
       const at = context.currentTime + 0.03;
-      const bus = amp(0.4);
-      bus.connect(nodes.ui);
-      const notes = tier === "gold" ? [783.99, 1046.5, 1567.98] : tier === "silver" ? [659.25, 987.77] : [587.33, 880];
-      notes.forEach((f, i) => {
-        const t0 = at + i * 0.09;
-        const hold = i === notes.length - 1 ? 1.1 : 0.45;
-        for (const [ratio, level] of [
-          [1, 0.12],
-          [2.01, 0.035],
-        ]) {
-          const osc = oscillator();
-          const env = amp(0);
-          osc.frequency.value = f * ratio;
-          env.gain.setValueAtTime(0, t0);
-          env.gain.linearRampToValueAtTime(level, t0 + 0.01);
-          env.gain.exponentialRampToValueAtTime(0.0003, t0 + hold);
-          osc.connect(env).connect(bus);
-          osc.start(t0);
-          osc.stop(t0 + hold + 0.05);
-          voice(osc, env);
-        }
-      });
+      play(bank(`chime-${tier === "gold" || tier === "silver" ? tier : "bronze"}`)[0], nodes.ui, MIX.chime, at, random(0.995, 1.005));
       bubbles(5, 0.5, 1.1, 0.6, at + 0.1);
+    },
+    // A hunter beaten: a drum and a rising fifth, and bubbles -- its own, not the fanfare.
+    victory() {
+      if (!ready()) return;
+      const at = context.currentTime + 0.03;
+      play(bank("victory")[0], nodes.ui, MIX.victory, at);
+      bubbles(8, 0.6, 1, 0.7, at + 0.05);
+    },
+    // Grown a good step within a stage: two soft notes up (not more often than every 20 s).
+    growth() {
+      if (!ready() || !coolOk("growth", 20)) return;
+      play(bank("growth")[0], nodes.ui, MIX.growth);
+    },
+    // Spawning: a warm chord swelling (A major, each voice a little out of tune with the
+    // others), and the heart slowing from 90 to 40 over four seconds.
+    spawn() {
+      if (!ready()) return;
+      const at = context.currentTime + 0.05;
+      const tone = filter("lowpass", 1200, 0.5);
+      const level = amp(0);
+      tone.connect(level).connect(nodes.body);
+      level.gain.setValueAtTime(0, at);
+      level.gain.linearRampToValueAtTime(MIX.pad, at + 1.5);
+      level.gain.setTargetAtTime(0, at + 5.5, 1);
+      [220, 277.18, 329.63, 440].forEach((f, i) => {
+        const o = oscillator(i % 2 ? "sine" : "triangle");
+        o.frequency.value = f;
+        o.detune.value = random(-3, 3);
+        o.connect(tone);
+        o.start(at);
+        o.stop(at + 10);
+        voice(o, i === 3 ? level : o);
+      });
+      calmFrom = clock;
+    },
+    // The white veil of spawning: everything but the bells goes quiet under it (on), and
+    // comes back after (off). Every new life takes it off.
+    veil(on) {
+      if (!context || !nodes) return;
+      const now = context.currentTime;
+      nodes.world.gain.cancelScheduledValues(now);
+      nodes.world.gain.setTargetAtTime(on ? 0 : 1, now, on ? 0.35 : 0.8);
+      if (!on) calmFrom = -1e9;
+    },
+    // A new generation hatched in the gravel: one clear bell.
+    hatch() {
+      if (!ready()) return;
+      play(bank("hatch")[0], nodes.ui, MIX.hatch, context.currentTime + 0.3);
+    },
+    // A death with no captor to be heard (worn out, starved, the angler's, the net's): a low
+    // swell closing over it, rising for a second and dying away over two.
+    ending() {
+      if (!ready() || !coolOk("ending", 5)) return;
+      const at = context.currentTime + 0.05;
+      const source = bufferSource(bank("brown")[0]);
+      const low = filter("lowpass", 300, 0.7);
+      const swell = amp(0);
+      low.frequency.setValueAtTime(300, at);
+      low.frequency.exponentialRampToValueAtTime(80, at + 3);
+      swell.gain.setValueAtTime(0, at);
+      swell.gain.linearRampToValueAtTime(MIX.ending, at + 1);
+      swell.gain.exponentialRampToValueAtTime(0.001, at + 3);
+      source.connect(low).connect(swell).connect(nodes.body);
+      source.start(at, Math.random() * 4);
+      source.stop(at + 3.1);
+      voice(source, swell);
+      const o = oscillator();
+      const hum = amp(0);
+      o.frequency.setValueAtTime(70, at);
+      o.frequency.exponentialRampToValueAtTime(45, at + 3);
+      hum.gain.setValueAtTime(0, at);
+      hum.gain.linearRampToValueAtTime(MIX.ending * 0.6, at + 1);
+      hum.gain.exponentialRampToValueAtTime(0.001, at + 3);
+      o.connect(hum).connect(nodes.body);
+      o.start(at);
+      o.stop(at + 3.1);
+      voice(o, hum);
     },
     // Thunder: when it is close a crack first, then the rumble rolling away in a few
     // swells. Under water the crack is dulled and the rumble comes through. `near` 0..1.
@@ -1038,10 +1061,13 @@ export function createSound() {
       const threat = danger > 0 || warnDanger;
       const triggered = (energy < 0.25 || threat) && wanted();
       if (triggered) heartUntil = clock + 10;
+      // (Spawning: calm, slowing from 90 to 40 over four seconds, until the veil.)
+      const calm = clock - calmFrom < 6;
+      if (calm) heartUntil = Math.max(heartUntil, clock + 4);
       beating = clock < heartUntil;
       if (beating) {
-        const target = !triggered ? 60 : threat ? 110 : 72;
-        bpm += (target - bpm) * (1 - Math.exp(-dt / (threat ? 0.6 : 2)));
+        const target = calm ? 90 - 50 * Math.min(1, (clock - calmFrom) / 4) : !triggered ? 60 : threat ? 110 : 72;
+        bpm += (target - bpm) * (1 - Math.exp(-dt / (calm ? 0.3 : threat ? 0.6 : 2)));
         if (clock >= nextBeat) {
           nextBeat = clock + 60 / bpm;
           if (wanted()) play(pick(bank("heart")), nodes.body, MIX.heart * Math.min(1, (heartUntil - clock) / 4) * random(0.9, 1), now + 0.02, random(0.98, 1.02));
