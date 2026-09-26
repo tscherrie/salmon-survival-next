@@ -1,10 +1,10 @@
 # Salmon Survival Next
 
-The same game, with new graphics: rebuilt on three.js r186 and WebGPU (with WebGL 2 where a browser has no WebGPU), one step at a time. It is a work in progress, so some things may look rough while they are being redone. The original stays as it is: [code](https://github.com/tscherrie/salmon-survival) · [play](https://salmon-survival.vercel.app).
+The same game, with new graphics: rebuilt on three.js r186 and WebGPU (with WebGL 2 where a browser has no WebGPU), one step at a time. It is a work in progress, so some things may look rough while they are being redone. Since 26 September 2026 it is the game at salmon-survival.vercel.app, and a salmon saved there swims on in it. The original graphics are still there to play: [play](https://salmon-survival-next.vercel.app) · [code](https://github.com/tscherrie/salmon-survival).
 
 Live one salmon's whole life in a Nordic river. Hatch in the gravel of the source, grow up in the brook, go down to the sea with the smolts, and fight your way home to spawn where you were born. On the way: storms and flash floods, an angler's fly, otters, gill nets, a fish ladder, sea lice at the salmon farm, the northern lights.
 
-**Play it in the browser:** https://salmon-survival-next.vercel.app — in English, Deutsch, 中文, 日本語 and Български. It needs a computer with a keyboard and a mouse, and it saves as you play.
+**Play it in the browser:** https://salmon-survival.vercel.app — in English, Deutsch, 中文, 日本語 and Български. It needs a computer with a keyboard and a mouse, and it saves as you play.
 
 Written with Claude Opus 5.5.
 
