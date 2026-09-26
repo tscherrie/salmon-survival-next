@@ -61,7 +61,7 @@ const MIX = {
   rain: 0.4,
   rainUnder: 0.6,
   pings: 0.28,
-  clatter: 0.6,
+  clatter: 1.3,
   chirp: 0.25,
   air: 0.5,
   whiteWater: 0.5,
@@ -1058,7 +1058,7 @@ export function createSound() {
       const river = 1 - seaW;
       const flowK = Math.min(1.5, Math.max(0, flow / 5));
       // A spate roars like white water, and rain and the air are shut out under ice.
-      roar = Math.max(roar, 0.55 * flood);
+      roar = Math.max(roar, 0.45 * flood);
       const open = 1 - Math.min(1, ice);
       if (clock > nextBubble) {
         // (Sparser at sea, and lower: bigger bubbles, from further off.)
@@ -1080,7 +1080,8 @@ export function createSound() {
       }
       // A flood knocks stones along the bed: bursts of clatter, now and then.
       if (clock > nextClatter) {
-        nextClatter = clock + (flood > 0.05 ? -Math.log(1 - Math.random()) / (1.5 * flood) : 1);
+        // (Spaced about evenly, not at random: a flood clatters all along.)
+        nextClatter = clock + (flood > 0.05 ? random(0.5, 1.5) / (1.5 * flood) : 1);
         if (flood > 0.05 && submerged > 0.5 && wanted()) play(pick(bank("clatter")), nodes.ambience, MIX.clatter * flood * random(0.4, 1), now + 0.02, random(0.9, 1.1), 0, true);
       }
       // Under ice it sings now and then: a thin, falling chirp as the sheet flexes.
