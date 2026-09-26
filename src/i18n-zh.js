@@ -38,7 +38,6 @@ const PAIRS = [
   ["You are seen", "你被发现了"],
   ["Hidden", "已隐藏"],
   ["Paused", "已暂停"],
-  ["Click the view or press P to swim on", "点击画面或按 P 继续"],
   // ---- Phones and tablets
   ["Stone Step", "石阶瀑布"],
   ["Oxbow", "牛轭湖"],
@@ -150,7 +149,6 @@ const PAIRS = [
   ["Full screen on iPhone and iPad:", "iPhone 和 iPad 全屏："],
   ["Tap Share", "点按“共享”"],
   ["(or “…” first), then “Add to Home Screen” – opened from there, the game has no address bar and keeps its own save.", "（或先点“…”），再点“添加到主屏幕”——从那里打开，游戏没有地址栏，并使用单独的存档。"],
-  ["Tap the view to swim on", "点击画面继续"],
   ["Bite, dash, leap", "咬、冲刺、跃"],
   ["Please turn your phone sideways.", "请把手机横过来。"],
   ["Map on/off in the pause menu", "地图：在暂停菜单中开关"],

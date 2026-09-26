@@ -38,7 +38,6 @@ const PAIRS = [
   ["You are seen", "見つかっている"],
   ["Hidden", "隠れている"],
   ["Paused", "一時停止中"],
-  ["Click the view or press P to swim on", "画面をクリックするか P で再開"],
   // ---- Phones and tablets
   ["Stone Step", "石の段"],
   ["Oxbow", "旧河道"],
@@ -150,7 +149,6 @@ const PAIRS = [
   ["Full screen on iPhone and iPad:", "iPhone・iPad で全画面："],
   ["Tap Share", "「共有」をタップ"],
   ["(or “…” first), then “Add to Home Screen” – opened from there, the game has no address bar and keeps its own save.", "（見当たらなければ先に「…」）、次に「ホーム画面に追加」。そこから開くとアドレスバーなしで遊べます（セーブは別になります）。"],
-  ["Tap the view to swim on", "画面をタップして再開"],
   ["Bite, dash, leap", "噛みつき、ダッシュ、ジャンプ"],
   ["Please turn your phone sideways.", "スマホを横向きにしてください。"],
   ["Map on/off in the pause menu", "マップ：一時停止メニューでオン／オフ"],

@@ -292,11 +292,6 @@ export function createHud({ stages }) {
     get hintFree() {
       return hintBox.hidden;
     },
-    paused(on, touch = false) {
-      veilBox.classList.toggle("dim", on);
-      if (on) toast("Pause", touch ? "Tipp ins Bild zum Weiterschwimmen" : "Klick ins Bild oder P zum Weiterschwimmen", 3600);
-      else toastBox.classList.remove("shown");
-    },
     // Something eaten: the bars bounce and its name floats up.
     fed(kind) {
       bump(energy, "fed");

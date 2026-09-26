@@ -38,7 +38,6 @@ const PAIRS = [
   ["You are seen", "Видян си"],
   ["Hidden", "Скрит"],
   ["Paused", "Пауза"],
-  ["Click the view or press P to swim on", "Щракни в картината или натисни P, за да продължиш"],
   // ---- Phones and tablets
   ["Stone Step", "Каменното стъпало"],
   ["Oxbow", "Старото корито"],
@@ -150,7 +149,6 @@ const PAIRS = [
   ["Full screen on iPhone and iPad:", "Цял екран на iPhone и iPad:"],
   ["Tap Share", "Докосни „Сподели“"],
   ["(or “…” first), then “Add to Home Screen” – opened from there, the game has no address bar and keeps its own save.", "(или първо „…“), после „Добави към началния екран“ – отворена оттам, играта е без адресна лента и със собствен запис."],
-  ["Tap the view to swim on", "Докосни картината, за да продължиш"],
   ["Bite, dash, leap", "Захапка, спринт, скок"],
   ["Please turn your phone sideways.", "Моля, обърни телефона хоризонтално."],
   ["Map on/off in the pause menu", "Карта: вкл./изкл. от менюто за пауза"],

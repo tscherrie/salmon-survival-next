@@ -716,6 +716,11 @@
 #intro.phone .for-desktop { display: none; }
 #intro.phone .for-phone { display: block; }
 #intro .phone-note { margin: 4px auto 20px; font-size: 16px; font-weight: 700; line-height: 1.5; }
+/* Paused mid-swim, the same card: the river stays in sight behind it, neither blurred nor
+   darkened, and the buttons in the corner can be used; a click beside the card swims on. */
+#intro.paused { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
+#intro.paused .card { pointer-events: auto; background: linear-gradient(160deg, rgb(14, 52, 60), rgb(5, 24, 30)); }
+#intro-start kbd { margin-left: 4px; vertical-align: 2px; background: rgba(6, 35, 42, 0.14); box-shadow: inset 0 -2px 0 rgba(6, 35, 42, 0.2); }
 
 /* Fades: a death, a new generation. */
 #veil {
@@ -728,7 +733,6 @@
   transition: opacity 1400ms ease;
 }
 #veil.dark { opacity: 1; }
-#veil.dim { opacity: 0.55; transition-duration: 400ms; }
 #veil.white { background: #e8f4f2; }
 
 /* ?fps: a small frame-rate readout for testing. */
@@ -913,6 +917,8 @@
    (with the controls under it, so the HUD sits above them), another tap closes it. */
 #status .rings { display: none; }
 .touch #hud { z-index: 4; }
+/* Paused, the corner buttons and their names over the card (there is no pointer to hover). */
+.touch.paused #hud { z-index: 6; }
 .touch #status { pointer-events: auto; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .touch #status:not(.expanded) { display: block; width: 60px; height: 60px; padding: 3px; border-radius: 50%; }
 .touch #status:not(.expanded) > :not(.rings):not(#pops) { display: none; }

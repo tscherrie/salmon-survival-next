@@ -1,7 +1,9 @@
 // The first thing on screen: the title, a line about what the game is, the controls, and
 // the button that starts the swim (which is also the click the browser needs before it
 // plays sound or captures the mouse). With a keyboard and a mouse the card lists the keys;
-// on a phone or a tablet, the touch controls (src/touch.js).
+// on a phone or a tablet, the touch controls (src/touch.js). Paused mid-swim, the same card
+// comes back as the pause, with everything on it (the language, vegan mode, a new game):
+// its button swims on, and the river stays in sight behind it, with the buttons in the corner.
 
 export function isDesktop() {
   const ua = navigator.userAgent;
@@ -20,8 +22,9 @@ import { track } from "./track.js";
 import { mode, setVegan } from "./vegan.js";
 
 const box = () => document.querySelector("#intro");
-// The language picker on the card: the one in use marked; another reloads in it.
-function languages(intro) {
+// The language picker on the card: the one in use marked; another reloads in it (after
+// `leaving()`, which keeps the fish when the game is under way).
+function languages(intro, leaving = () => {}) {
   intro.querySelector(".links a")?.addEventListener("click", () => track("github"));
   const picker = intro.querySelector(".langs");
   if (!picker || picker.childElementCount) return;
@@ -34,6 +37,7 @@ function languages(intro) {
     button.addEventListener("click", () => {
       if (code === lang) return;
       track("language", { to: code });
+      leaving();
       setTimeout(() => setLang(code), 150);
     });
     picker.append(button);
@@ -72,16 +76,36 @@ export function showPhoneNotice() {
 }
 
 // Shows the card at once, while the river is still being built; `ready()` enables the
-// button, and the promise resolves when it is pressed.
-export function showIntro({ resume = null } = {}) {
+// button, and the promise resolves when it is pressed. (Development runs start without it:
+// `title: false`.) Mid-swim `pause()` shows it again and `resume()` takes it away; its
+// button then calls `onResume`, and `beforeReload` runs before a language switch reloads.
+export function showIntro({ resume = null, title = true, onResume = () => {}, beforeReload = () => {} } = {}) {
   const intro = box();
   const button = intro.querySelector("#intro-start");
   const status = intro.querySelector("#intro-status");
-  intro.hidden = false;
+  const kicker = intro.querySelector(".kicker");
+  let paused = false;
+  let gone = 0;
+  const show = () => {
+    clearTimeout(gone);
+    intro.classList.remove("leaving");
+    intro.hidden = false;
+  };
+  const hide = () => {
+    clearTimeout(gone);
+    intro.classList.add("leaving");
+    gone = setTimeout(() => {
+      intro.hidden = true;
+      intro.classList.remove("paused");
+    }, 500);
+  };
   showVersion(intro);
-  languages(intro);
+  languages(intro, () => paused && beforeReload());
   homeScreen(intro);
-  if (asApp()) track("app");
+  if (title) {
+    show();
+    if (asApp()) track("app");
+  }
   button.disabled = true;
   button.textContent = "Der Fluss entsteht …";
   if (resume) status.textContent = `Gespeichert: ${resume}`;
@@ -97,15 +121,15 @@ export function showIntro({ resume = null } = {}) {
   let release;
   const started = new Promise((resolve) => (release = resolve));
   button.addEventListener("click", () => {
-    intro.classList.add("leaving");
-    setTimeout(() => (intro.hidden = true), 500);
+    if (paused) return onResume();
+    hide();
     release();
   });
   // With a fish saved: a small way to start over instead (asked twice, it cannot be undone).
   const fresh = intro.querySelector("#intro-new");
+  let sure = false;
   if (fresh) {
     fresh.hidden = !resume;
-    let sure = false;
     fresh.addEventListener("click", () => {
       if (!sure) {
         sure = true;
@@ -122,6 +146,39 @@ export function showIntro({ resume = null } = {}) {
       button.disabled = false;
       button.textContent = resume ? "Weiterschwimmen" : "Losschwimmen";
       button.focus({ preventScroll: true });
+    },
+    // Paused: the card over the river as it is (not blurred, the corner buttons free), with
+    // the fish's stage as saved; the button, P or a click beside the card swims on.
+    pause({ saved = null, touch = false } = {}) {
+      paused = true;
+      intro.classList.add("paused");
+      intro.setAttribute("aria-modal", "false");
+      if (kicker) kicker.hidden = false;
+      button.disabled = false;
+      button.textContent = "Weiterschwimmen";
+      if (!touch) {
+        const key = document.createElement("kbd");
+        key.textContent = "P";
+        button.append(" ", key);
+      }
+      status.textContent = saved ? `Gespeichert: ${saved}` : "";
+      if (vegan) vegan.checked = mode.vegan;
+      if (fresh) {
+        sure = false;
+        fresh.textContent = "Neues Spiel starten";
+        fresh.hidden = false;
+      }
+      show();
+      // (On a small screen the card scrolls: from the top, as far as the button.)
+      intro.querySelector(".card").scrollTop = 0;
+      button.scrollIntoView({ block: "nearest" });
+      button.focus({ preventScroll: true });
+    },
+    resume() {
+      if (!paused) return;
+      paused = false;
+      button.blur();
+      hide();
     },
   };
 }

@@ -36,7 +36,6 @@ const PAIRS = [
   ["Du wirst gesehen", "You are seen"],
   ["Versteckt", "Hidden"],
   ["Pause", "Paused"],
-  ["Klick ins Bild oder P zum Weiterschwimmen", "Click the view or press P to swim on"],
   // ---- Phones and tablets
   ["Steinstufe", "Stone Step"],
   ["Altarm", "Oxbow"],
@@ -150,7 +149,6 @@ const PAIRS = [
   ["Vollbild auf iPhone und iPad:", "Full screen on iPhone and iPad:"],
   ["Tippe auf Teilen", "Tap Share"],
   ["(oder erst auf „…“) und dann auf „Zum Home-Bildschirm“ – von dort startet das Spiel ohne Adressleiste, mit eigenem Spielstand.", "(or “…” first), then “Add to Home Screen” – opened from there, the game has no address bar and keeps its own save."],
-  ["Tipp ins Bild zum Weiterschwimmen", "Tap the view to swim on"],
   ["Biss, Spurt, Sprung", "Bite, dash, leap"],
   ["Bitte dreh dein Handy quer.", "Please turn your phone sideways."],
   ["Karte ein/aus im Pausemenü", "Map on/off in the pause menu"],

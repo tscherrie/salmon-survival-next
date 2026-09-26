@@ -81,18 +81,22 @@ function storedQuality() {
     return null;
   }
 }
+// The stage a life is at, for the title card ("Parr · Generation 2").
+const stageLabel = (stage, generation) => `${STAGES[stage].name}${generation ? ` · Generation ${generation + 1}` : ""}`;
 function savedStageName() {
   const saved = savedStage();
   if (!saved || !STAGES[saved.stage]) return null;
-  return `${STAGES[saved.stage].name}${saved.generation ? ` · Generation ${saved.generation + 1}` : ""}`;
+  return stageLabel(saved.stage, saved.generation);
 }
 
 async function start() {
   // How long the way to the title card's button takes, step by step (performance marks,
   // read back with performance.getEntriesByType("mark")).
   performance.mark("salmon:start");
-  // The title card goes up at once and waits for the river to be built.
-  const intro = dev ? null : showIntro({ resume: savedStageName() });
+  // The title card goes up at once and waits for the river to be built. (It is the pause as
+  // well: P mid-swim shows it again, over the river as it is -- see setPaused below.)
+  const title = !dev;
+  const intro = showIntro({ resume: savedStageName(), title, onResume: () => swimOn(), beforeReload: () => persist() });
   // The graphics quality: ?quality= in the address, else what the player chose (the G button,
   // below), else Detail on a computer and Balanced on a phone.
   const profile = qualityName(query.get("quality") || storedQuality() || (touchMode ? "balanced" : "detail"));
@@ -335,8 +339,9 @@ async function start() {
   // The places worth finding: found by swimming into them.
   const places = createPlaces({ badges });
   const logbook = createLogbook({ hud, badges, places });
-  // (On a phone the map is shown from the start, small and see-through in a corner.)
-  const minimap = createMinimap({ logbook, places, shownAtFirst: touchMode });
+  // The map is shown from the start until the player hides it (on a phone small and
+  // see-through in a corner).
+  const minimap = createMinimap({ logbook, places, shownAtFirst: true });
   let homeShown = false;
   mark("logbook");
   // Development: ?mate shows two made-up companions on the map, the way others would be
@@ -387,16 +392,29 @@ async function start() {
     sound.hush(open || userPaused);
   }
   // Pause: P, or leaving the game -- Esc out of fullscreen or out of the captured pointer,
-  // another window in front. A click on the river (or P) swims on.
+  // another window in front. The title card comes back (the fish saved first), over the
+  // river as it is, with the buttons in the corner free; its button, P or a click on the
+  // river swims on.
   function setPaused(value) {
     if (userPaused === value) return;
     userPaused = value;
     habitat.classList.toggle("paused", value);
-    hud.paused(value, touchMode);
-    if (value) touch?.release();
+    if (value) {
+      freeThePointer();
+      if (dead <= 0 && !fish.airborne) persist();
+      intro.pause({ saved: stageLabel(fish.stage, save.generation), touch: touchMode });
+    } else intro.resume();
     sound.hush(value || logbook.open);
     held.clear();
     if (!value) last = performance.now();
+  }
+  // Out of the pause by the card's button or P: back into the game as by a click on the river.
+  function swimOn() {
+    setPaused(false);
+    look.yaw = fish.yaw;
+    look.pitch = fish.pitch;
+    capture();
+    canvas.focus({ preventScroll: true });
   }
   // Into the game: full screen (unless F has turned it off) and the pointer captured, when
   // the swim starts and whenever it is taken up again with a click.
@@ -407,7 +425,8 @@ async function start() {
         // On a phone, held sideways from then on (where the browser lets a page ask).
         .then(() => touchMode && screen.orientation?.lock?.("landscape"))
         .catch(() => {});
-    if (!touchMode) Promise.resolve(canvas.requestPointerLock?.()).catch(() => {});
+    // (Not while paused: F there only goes full screen, the card's buttons want the pointer.)
+    if (!touchMode && !userPaused) Promise.resolve(canvas.requestPointerLock?.()).catch(() => {});
   }
   let wasFullscreen = false;
   document.addEventListener("fullscreenchange", () => {
@@ -477,7 +496,7 @@ async function start() {
   const input = { yaw: 0, pitch: 0, forward: false, brake: false, strafe: 0, lunge: false };
   let lungeQueued = false;
   let userPaused = false;
-  let waiting = !!intro;
+  let waiting = title;
   let zoom = 1;
   const LOOK_SPEED = 0.0022;
   const locked = () => document.pointerLockElement === canvas;
@@ -519,7 +538,9 @@ async function start() {
     }
     if (logbook.open) return;
     if (event.code === "KeyP" && !event.repeat) {
-      setPaused(!userPaused);
+      // (Not on the title card before the swim: its button starts it.)
+      if (userPaused) swimOn();
+      else if (!waiting) setPaused(true);
       return;
     }
     if (userPaused) return;
@@ -2610,7 +2631,7 @@ async function start() {
     }
   }
   // Nothing moves until the swim is started from the title card.
-  waiting = !!intro;
+  waiting = title;
   step(1 / 60);
   mark("first-step");
   draw(1 / 60);
@@ -2627,7 +2648,7 @@ async function start() {
     track("mode", { vegan: mode.vegan });
   };
   mark("ready");
-  if (intro) {
+  if (title) {
     intro.ready();
     intro.started.then(() => {
       track("start", { stage: STAGES[fish.stage].id, lang, resumed: state && !query.has("new") ? "yes" : "no" });
