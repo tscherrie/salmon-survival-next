@@ -8,8 +8,11 @@
   its own, and what a scene measures of its own (a band's loudness, its swell and period,
   onsets in it, left against right: see toolbox()). There are beds (each part of the river,
   rain, ice, a flood), crossings of the surface, one-shots over the bed, sounds on their
-  own, scenes that must stay silent (muted, hushed, hidden, with every sound fired) and
-  half a minute of everything at once (the stress: voices, nodes, peaks). Run by
+  own, scenes that must stay silent (muted, hushed, hidden, with every sound fired), scenes
+  that go on for a while (a hunter lying in wait for a minute, strength low for half a
+  minute, a kingfisher's attack as the game lists it) and half a minute of everything at
+  once (the stress: voices, nodes, peaks). A scene can watch the sound's own stats frame by
+  frame (`watch`) and count the nodes its events made (eventNodes). Run by
   tools/sound-check.mjs; open it by hand and call runAll() to look at it.
   (The scenes also run against an older src/sound.js, for a before and after: what it did
   not have yet is called with ?. and it is told `above` as well as `submerged`.)
@@ -87,6 +90,8 @@
     const list = [hunter("pike"), hunter("seal", 1), hunter("heron", 2), hunter("bear", 3)];
     list.forEach((h, i) => Object.assign(h, { level: 0.4 + 0.2 * i, coiled: i === 3, pan: i / 2 - 0.75 }));
     s.warn?.(list);
+    s.whiff?.(list[0].key, "pike");
+    s.whiff?.(list[2].key, "heron");
     s.storm?.();
     s.lightning?.(1);
     s.plops?.(5);
@@ -129,6 +134,7 @@
     for (let t = 3; t < 29.5; t += 4.1) events.push([t, (s) => (s.chime("gold"), s.fanfare(), s.victory?.(), s.growth?.())]);
     for (let t = 1.5; t < 29.5; t += 3.3) events.push([t, (s) => (s.thunder(Math.random()), s.lightning?.(0.9), s.otter(), s.reel(), s.eaten(t % 2 < 1 ? "fish" : "bird"))]);
     for (let t = 5; t < 29.5; t += 5) events.push([t, (s) => (s.storm?.(), s.plops?.(5), s.counter?.(), s.leapResult?.("cleared"), s.leapResult?.("failed"), s.debug?.ship?.(), s.debug?.grunt?.(), s.debug?.chirp?.())]);
+    for (let t = 2.2; t < 29.5; t += 1.5) events.push([t, (s) => s.whiff?.(hunters[Math.floor(t) % 4].key, hunters[Math.floor(t) % 4].kind)]);
     for (let t = 0.3; t < 29.5; t += 1 / 30) events.push([t, (s) => s.charge?.(0.5 - 0.5 * Math.cos((t / 1.2) * Math.PI * 2))]);
     events.push([29.4, (s) => s.charge?.(-1)]);
     return events;
@@ -147,8 +153,16 @@
       kind: "shot",
       params: {},
       events: warnings(0.5, 7.8, (t) => (t < 4 ? [] : [Object.assign(h, { level: 0.4, pan, near: 0.6 })])),
-      measure: (m) => ({ pan: m.pan(4, 4.8, 2.5, 3.5) }),
+      measure: (m) => ({ pan: m.pan(4.15, 4.5, 300, 550) }),
     };
+  }
+  // A hunter chasing from 1 s, coiling for `coil` seconds from 4 s: its last tick should
+  // come where the coil ends.
+  function coiling(name, coil) {
+    const h = hunter("pike");
+    // (The frame at 4 s may come a hair before it: 1e-6.)
+    const from = 4 - 1e-6;
+    return { name, kind: "shot", params: {}, events: warnings(0.5, 7.9, (t) => (t < 1 ? [] : [Object.assign(h, { level: t < from ? 0.8 : 1, coiled: t >= from && t < 4 + coil, coil: 4 + coil - t, near: 0.8 })])), measure: (m) => ({ coil, last: m.lastLoud(4, 4.2 + coil, 1000, 4500) - 4 }) };
   }
   const SCENES = [
     { name: "bed_river", kind: "bed", params: {}, measure: (m) => ({ gills: m.band(3, 8, 500, 1500) }) },
@@ -169,10 +183,10 @@
       ["sea", 0.2],
     ].map(([region, flow]) => ({ name: `bed_${region}`, kind: "bed", params: { regions: only(region), sea: region === "sea" ? 1 : 0, flow, depthRel: 0.6 }, measure: (m) => ({ surge: m.modulation(3, 8, 40, 150) }) })),
     // Rain from under the surface, just below it; under ice (none gets through); a flood.
-    { name: "bed_rain_under", kind: "bed", params: { rain: 1, depthRel: 0.2 } },
+    { name: "bed_rain_under", kind: "bed", seconds: 12, params: { rain: 1, depthRel: 0.2 }, measure: (m) => ({ repeats: m.repeats(3, 12, 6000, 14000, 1.5, 3) }) },
     { name: "bed_ice", kind: "bed", params: { rain: 1, ice: 1 } },
     { name: "bed_flood", kind: "bed", params: { flood: 1, flow: 5 }, measure: (m) => ({ clatter: m.modulation(3, 8, 2000, 6000, 0.1) }) },
-    { name: "bed_sea_swell", kind: "bed", seconds: 24, params: { regions: only("sea"), sea: 1, flow: 0.2, depthRel: 0.6 }, measure: (m) => ({ swell: m.modulation(3, 24, 150, 500), period: m.period(3, 24, 150, 500, 6, 14) }) },
+    { name: "bed_sea_swell", kind: "bed", seconds: 40, params: { regions: only("sea"), sea: 1, flow: 0.2, depthRel: 0.6 }, measure: (m) => ({ swell: m.modulation(3, 40, 150, 500), period: m.period(3, 40, 150, 500, 6, 14), swing: m.swing(3, 40, 0.4) }) },
     { name: "bed_above_roar", kind: "bed", params: { submerged: 0, roar: 1 } },
     { name: "bed_above_rain", kind: "bed", params: { submerged: 0, rain: 1 } },
     { name: "cross_river", kind: "cross", params: (t) => ({ submerged: air(t) }) },
@@ -222,21 +236,28 @@
     shot("snap", (s) => s.snap()),
     shot("thunder_near", (s) => s.thunder(1)),
     shot("lightning_near", (s) => s.lightning?.(1)),
+    shot("lightning_above", (s) => s.lightning?.(1), { submerged: 0 }),
     // Above the water, heard from under it: the mill wheel near by from 4 s on, bread, the
     // fish counter.
     { name: "mill", kind: "shot", seconds: 12, params: (t) => ({ mill: t >= 4 ? 1 : 0 }), measure: (m) => ({ slaps: m.onsets(4, 12, 800, 2000, 4, 0.5) }) },
     shot("bread", (s) => s.plops?.(5)),
     // At sea: a ship passing (16 s from 4 s on), fish grunting at night.
     { name: "ship", kind: "shot", seconds: 24, params: { regions: only("sea"), sea: 1 }, events: [[4, (s) => s.debug?.ship?.(16)]], measure: (m) => ({ rise: m.band(10, 14, 30, 60) - m.band(2, 4, 30, 60), throb: m.period(9, 15, 300, 900, 0.2, 0.4, 0.02), after: m.band(21, 23.5, 30, 60) - m.band(2, 4, 30, 60) }) },
-    { ...shot("grunts", (s) => s.debug?.grunt?.(), { regions: only("sea"), sea: 1, daylight: 0 }), measure: (m) => ({ knocks: m.onsets(4, 5, 150, 300, 4, 0.03) }) },
+    // (And the same without them: the sea heaves, so they are heard against the same moment
+    // of it.)
+    { ...shot("grunts", (s) => s.debug?.grunt?.(), { regions: only("sea"), sea: 1, daylight: 0 }), measure: (m) => ({ knocks: m.onsets(4, 5, 150, 300, 4, 0.03), peak: m.loudest(4, 5, 0.4) }) },
+    { ...shot("grunts_ref", () => {}, { regions: only("sea"), sea: 1, daylight: 0 }), measure: (m) => ({ peak: m.loudest(4, 5, 0.4) }) },
     shot("counter", (s) => s.counter?.()),
-    { ...shot("storm_swell", (s) => s.storm?.()), seconds: 12, measure: (m) => ({ d400: m.loudest(4, 11.5, 0.4) - m.loudest(2.5, 4, 0.4), early: m.spectrum(4.5, 6).centroid, late: m.spectrum(6.5, 7.9).centroid }) },
+    { ...shot("storm_swell", (s) => s.storm?.()), seconds: 12, measure: (m) => ({ d400: m.loudest(4, 11.5, 0.4) - m.loudest(2.5, 4, 0.4), phone: m.loudestPhone(4, 11.5, 0.4) - m.loudestPhone(2.5, 4, 0.4) }) },
+    // The same with the beds stopped: brightening as it swells (before its thunder at 8 s).
+    { ...shot("storm_alone", (s) => s.storm?.()), alone: true, measure: (m) => ({ early: m.spectrum(5, 6.5).centroid, late: m.spectrum(6.5, 8).centroid }) },
     shot("thunder_far", (s) => s.thunder(0.1)),
     shot("eaten_fish", (s) => s.eaten("fish")),
     shot("eaten_bird", (s) => s.eaten("bird")),
     shot("fanfare", (s) => s.fanfare()),
     // What the fish does: a burst, its jaws, Space with no breath left, the leap's charge.
     shot("dash", (s) => s.dash?.(1)),
+    shot("dash_L9", (s) => s.dash?.(9)),
     shot("jaws", (s) => s.jaws?.(1, 1)),
     shot("jaws_auto", (s) => s.jaws?.(1, 0.5)),
     shot("denied", (s) => s.denied?.()),
@@ -262,10 +283,70 @@
       return { name: "warn_coiled", kind: "shot", params: {}, events: warnings(0.5, 7.9, (t) => (t < 4 ? [] : [Object.assign(h, { level: 1, coiled: t < 4.5, near: 0.8 })])), measure: (m) => ({ tick: m.band(4, 4.4, 1100, 2600) - m.band(2.5, 4, 1100, 2600) }) };
     })(),
     (() => {
-      // Hunting from 1 s, striking at 2.5, gone off to recover at 4 (it missed).
+      // Hunting from 1 s, striking at 2.5, gone off to recover at 4: it missed.
       const h = hunter("pike");
-      return { name: "hunter_miss", kind: "shot", params: {}, events: warnings(0.5, 7.9, (t) => (t < 1 || t >= 4 ? [] : [Object.assign(h, { level: t < 2.5 ? 0.8 : 1, coiled: t >= 2.5 && t < 2.8 })])), measure: (m) => ({ snap: m.band(4, 4.15, 2000, 3000) - m.band(3.2, 3.9, 2000, 3000) }) };
+      return { name: "hunter_miss", kind: "shot", params: {}, events: [[4, (s) => s.whiff?.(h.key, "pike")], ...warnings(0.5, 7.9, (t) => (t < 1 || t >= 4 ? [] : [Object.assign(h, { level: t < 2.5 ? 0.8 : 1, coiled: t >= 2.5 && t < 2.8 })]))], measure: (m) => ({ snap: m.band(4, 4.15, 2000, 3000) - m.band(3.2, 3.9, 2000, 3000) }) };
     })(),
+    // A kingfisher's attack as life.js lists it: hovering from 4 s, coiled from 4.8, gone
+    // into its dive at 5.3, the catch at 5.65 -- nothing may snap before the catch.
+    (() => {
+      const k = hunter("kingfisher");
+      return {
+        name: "kingfisher_kill",
+        kind: "shot",
+        params: {},
+        events: [[4, (s) => s.call("kingfisher")], [5.65, (s) => s.eaten("bird")], ...warnings(0.5, 7.9, (t) => (t < 4 || t >= 5.3 ? [] : [Object.assign(k, { level: t < 4.8 ? 0.8 : 1, coiled: t >= 4.8, coil: 5.3 - t, pan: 0.2 })]))],
+        // (The loudest 30 ms against the band's level before.)
+        // (The loudest 30 ms from just after the coil's last tick, which ends at 5.3, against
+        // the loudest before it all.)
+        measure: (m) => ({ early: m.bandMax(5.33, 5.64, 2500, 3500, 0.03) - m.bandMax(2.5, 3.9, 2500, 3500, 0.03), clack: m.bandMax(5.66, 5.76, 2500, 3500, 0.03) - m.bandMax(2.5, 3.9, 2500, 3500, 0.03) }),
+      };
+    })(),
+    // A heron's strike that bites (a big fish): the bite at 6.3, the heron in its strike till
+    // 7.2 -- no snap or croak after the bite.
+    (() => {
+      const he = hunter("heron");
+      return {
+        name: "heron_bite",
+        kind: "shot",
+        seconds: 10,
+        params: { regions: only("upper"), flow: 2 },
+        events: [[6.3, (s) => s.thump("body", 1.3)], ...warnings(0.5, 9.9, (t) => (t < 4 || t >= 7.2 ? [] : [Object.assign(he, { level: t < 5 ? 0.5 : t < 6 ? 0.8 : 1, coiled: t >= 6, coil: 6.3 - t, pan: -0.4 })]))],
+        measure: (m) => ({ snaps: m.onsets(6.45, 9.5, 2000, 3200, 8), croak: m.band(6.5, 9.5, 700, 1200) - m.band(2, 3.9, 700, 1200) }),
+      };
+    })(),
+    // The last tick of a coil where its strike comes: a bullhead's short one, a king's long.
+    coiling("coil_short", 0.18),
+    coiling("coil_long", 0.45),
+    // A drive of three goosanders noticing the fish at once: one call, not three.
+    (() => {
+      const drive = [hunter("drive", 1), hunter("drive", 2), hunter("drive", 3)];
+      return { name: "drive_notice", kind: "shot", params: {}, events: warnings(0.5, 7.9, (t) => (t < 4 ? [] : drive.map((d, i) => Object.assign(d, { level: 0.4, pan: i - 1, near: 0.6 })))) };
+    })(),
+    // A pike lying in wait with the fish in view for a minute: its pulses thin out.
+    (() => {
+      const h = hunter("pike", 7);
+      // (Counted as played: three nodes each, placed.)
+      return { name: "stalk_60s", kind: "shot", seconds: 64, params: {}, events: warnings(0.5, 63.9, (t) => (t < 4 ? [] : [Object.assign(h, { level: 0.6, near: 0.4, pan: 0.3 })])), measure: (m) => ({ first: m.eventNodes(4.5, 12.5) / 3, last: m.eventNodes(43.5, 63.5) / 3, level: m.loud(58, 63.5) - m.loud(2, 3.9) }) };
+    })(),
+    // A rival courting the hen at the redd: noticed, but no pulses.
+    (() => {
+      const rv = hunter("rival", 9);
+      return { name: "redd_rival", kind: "shot", seconds: 20, params: {}, events: warnings(0.5, 19.9, (t) => (t < 4 ? [] : [Object.assign(rv, { level: 0.9, near: 0.7, pan: 0.2 })])), measure: (m) => ({ pulses: m.eventNodes(5, 19.5) / 3 }) };
+    })(),
+    // Started at once, before its samples are made: it plays what is there, the rest when
+    // it is made (every sound asked for from 1 s on, and again at 4 s).
+    { name: "early_start", kind: "shot", early: true, params: busy, events: [[1, (s) => everything(s)], [4, (s) => everything(s)]], measure: (m) => ({ making: m.makingAtStart }) },
+    // Strength low from 4 s on, for good (a blow at 30 s takes more of it): the heart for ten
+    // seconds, then not again until the blow.
+    {
+      name: "heart_weak",
+      kind: "shot",
+      seconds: 40,
+      params: (t) => ({ energy: t < 4 ? 1 : t < 30 ? 0.2 : 0.15 }),
+      watch: (s) => s.stats.ambience,
+      measure: (m) => ({ on: m.band(5, 12, 440, 620) - m.band(2, 4, 440, 620), after: m.band(18, 29.5, 440, 620) - m.band(2, 4, 440, 620), ducked: Math.max(...m.watched(6, 10)), duck: Math.min(...m.watched(17, 29.5)), again: m.band(31, 37, 440, 620) - m.band(2, 4, 440, 620) }),
+    },
     // The heart: strength low from 4 to 6 s, then ten seconds more of it, fading.
     {
       name: "heartbeat",
@@ -277,14 +358,14 @@
     // Their voices, heard from under the water.
     ...["kingfisher", "heron", "merganser", "seal", "bear"].map((kind) => ({ ...shot(`call_${kind}`, (s) => s.call(kind)), measure: (m) => ({ mid: m.band(4, 5.5, 500, 1500) - m.band(2.5, 4, 500, 1500) }) })),
     // The scent of home, at its strongest.
-    { name: "bed_home", kind: "bed", params: { home: 1 } },
+    { name: "bed_home", kind: "bed", seconds: 14, params: { home: 1 }, measure: (m) => ({ repeats: m.repeats(3, 14, 600, 1600, 1.5, 4.5, 0.05) }) },
     { name: "bed_winded", kind: "bed", params: { winded: true, breath: 0.05 }, measure: (m) => ({ gills: m.band(3, 8, 500, 1500), pulse: m.period(3, 8, 500, 1500, 0.1, 0.2, 0.01) }) },
     shot("chime_gold", (s) => s.chime("gold")),
     // The stages of a life: a beaten hunter, growing, hatching, a death with no captor.
     shot("victory", (s) => s.victory?.()),
     shot("growth", (s) => s.growth?.()),
     shot("hatch", (s) => s.hatch?.()),
-    { ...shot("ending", (s) => s.ending?.()), measure: (m) => ({ swell: m.loud(4.3, 6.3) - m.loud(2, 4) }) },
+    { ...shot("ending", (s) => s.ending?.()), measure: (m) => ({ swell: m.loud(4.3, 6.3) - m.loud(2, 4), phone: m.loudPhone(4.3, 6.3) - m.loudPhone(2, 4) }) },
     // Spawning: the pad and the calm heart from 4 s, silence under the veil from 8 s, the
     // world back and the hatch bell at 13 s.
     {
@@ -317,12 +398,14 @@
     } catch {}
     const sound = createSound();
     // As in the game: the sound object exists a while (the loading) before the first click,
-    // time for it to make its samples (up to 3 s here; the game loads for longer).
-    for (let i = 0; i < 30 && (i < 3 || sound.stats?.making); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+    // time for it to make its samples (up to 3 s here; the game loads for longer) -- or,
+    // `early`, a click at once.
+    for (let i = 0; i < 30 && !scene.early && (i < 3 || sound.stats?.making); i++) await new Promise((resolve) => setTimeout(resolve, 100));
     const madeMs = sound.stats?.madeMs;
     const t0 = performance.now();
     sound.start();
     const startMs = performance.now() - t0;
+    const makingAtStart = sound.stats?.making;
     const ctx = current;
     const baseNodes = ctx.count;
     const params = (t) => {
@@ -337,16 +420,20 @@
     let bubbleNodes = 0;
     let maxLive = 0;
     let updateMs = 0;
+    const watched = [],
+      eventNodes = [];
     sound.update(dt, params(0));
     for (let i = 1; i < seconds / dt - 1; i++) {
       const t = i * dt;
       OfflineAudioContext.prototype.suspend.call(ctx, t).then(() => {
-        if (i === 3 && scene.kind === "solo") for (const s of ctx.sources) if (s.loop) s.stop();
+        if (i === 3 && (scene.kind === "solo" || scene.alone)) for (const s of ctx.sources) if (s.loop) s.stop();
+        const made = ctx.count;
         while (events.length && events[0][0] <= t + 1e-6) {
           const before = ctx.count;
           events.shift()[1](sound, t);
           shotNodes += ctx.count - before;
         }
+        if (ctx.count > made) eventNodes.push([t, ctx.count - made]);
         const before = ctx.count;
         const p = params(t);
         const u0 = performance.now();
@@ -354,6 +441,7 @@
         updateMs += performance.now() - u0;
         bubbleNodes += ctx.count - before;
         maxLive = Math.max(maxLive, sound.stats?.live ?? 0);
+        if (scene.watch) watched.push([t, scene.watch(sound)]);
         ctx.resume();
       });
     }
@@ -372,7 +460,7 @@
     const buffer = await ctx.startRendering();
     clearInterval(nudge);
     const stats = sound.stats ?? {};
-    return { buffer, startMs, madeMs, baseNodes, shotNodes, bubbleNodes, maxLive, nodes: ctx.count, bytes: stats.bytes, updateUs: (updateMs * 1000) / (seconds / dt), live: stats.live };
+    return { buffer, startMs, madeMs, baseNodes, shotNodes, bubbleNodes, maxLive, nodes: ctx.count, bytes: stats.bytes, unbanked: stats.unbanked, updateUs: (updateMs * 1000) / (seconds / dt), live: stats.live, watched, eventNodes, makingAtStart };
   }
 
   // ---- Measuring.
@@ -468,15 +556,25 @@
     const edges = [0, 150, 500, 1500, 4000, 24000];
     const bands = new Array(edges.length - 1).fill(0);
     let total = 1e-30,
-      moment = 0;
+      moment = 0,
+      // (Flatness over 100-5000 Hz: the geometric mean of the power over its mean -- near 0
+      // for a tone, towards 1 for noise.)
+      logSum = 0,
+      sum = 0,
+      count = 0;
     for (let i = 0; i <= n / 2; i++) {
       const f = (i * SR) / n,
         p = re[i] * re[i] + im[i] * im[i];
       total += p;
       moment += f * p;
       for (let b = 0; b < bands.length; b++) if (f >= edges[b] && f < edges[b + 1]) bands[b] += p;
+      if (f >= 100 && f <= 5000) {
+        logSum += Math.log(p + 1e-30);
+        sum += p;
+        count++;
+      }
     }
-    return { centroid: moment / total, bands: bands.map((p) => (100 * p) / total) };
+    return { centroid: moment / total, bands: bands.map((p) => (100 * p) / total), flatness: +(Math.exp(logSum / count) / (sum / count + 1e-30)).toFixed(4) };
   }
 
   // Butterworth fourth-order lowpass; and a band between two of them.
@@ -491,7 +589,7 @@
   const plainDb = (ms) => 10 * Math.log10(ms + 1e-20);
   // What a scene can measure beyond the usual: loudness in a band, its swell and period,
   // onsets in it (pulses, ticks), left against right.
-  function toolbox(channels, k, kp) {
+  function toolbox(channels, k, kp, r) {
     const cache = new Map();
     const banded = (f0, f1) => {
       const key = `${f0}-${f1}`;
@@ -549,16 +647,55 @@
         }
         return count;
       },
-      // Left over right (dB) in [from, to), with what was there in [bedFrom, bedTo) taken off.
-      pan(from, to, bedFrom, bedTo) {
-        const e = (c, a, b) => {
-          let sum = 0;
-          for (let i = Math.floor(a * SR); i < Math.floor(b * SR); i++) sum += c[i] * c[i];
-          return sum / ((b - a) * SR);
-        };
-        const l = Math.max(1e-20, e(channels[0], from, to) - e(channels[0], bedFrom, bedTo));
-        const r = Math.max(1e-20, e(channels[1], from, to) - e(channels[1], bedFrom, bedTo));
-        return 10 * Math.log10(l / r);
+      // Left over right (dB) in [from, to), in the band f0-f1 (bed and all: taking the bed
+      // off breaks down where a channel has nothing over it).
+      pan(from, to, f0, f1) {
+        const [l, r] = banded(f0, f1).map((c) => meanSquare([c], from, to));
+        return Math.max(-30, Math.min(30, 10 * Math.log10((l + 1e-20) / (r + 1e-20))));
+      },
+      // The band's loudest `window` in [from, to).
+      bandMax: (from, to, f0, f1, window) => Math.max(...bandSeries(from, to, f0, f1, window, window / 4)),
+      // When the band was last within `below` dB of its loudest in [from, to) (5 ms windows):
+      // where a run of ticks, each louder than the last, ends.
+      lastLoud(from, to, f0, f1, below = 6) {
+        const s = bandSeries(from, to, f0, f1, 0.005, 0.0025);
+        const top = Math.max(...s);
+        let last = 0;
+        for (let i = 0; i < s.length; i++) if (s[i] >= top - below) last = i;
+        return from + last * 0.0025;
+      },
+      // What the scene watched of the sound (scene.watch), frame by frame, in [from, to).
+      watched: (from, to) => r.watched.filter(([t]) => t >= from && t < to).map(([, v]) => v),
+      // The nodes its events made in [from, to) (what was played, not what was heard).
+      eventNodes: (from, to) => r.eventNodes.filter(([t]) => t >= from && t < to).reduce((sum, [, n]) => sum + n, 0),
+      makingAtStart: r.makingAtStart,
+      // How far the loudness swings (the 90th percentile of `window` loudness less the
+      // 10th), full band.
+      swing(from, to, window = 0.4) {
+        const s = series(k, from, to, window).sort((a, b) => a - b);
+        return s[Math.floor(0.9 * (s.length - 1))] - s[Math.floor(0.1 * (s.length - 1))];
+      },
+      // How much the band's strength (`window` s at a time) comes round again after `minLag`
+      // to `maxLag` s: the best correlation (1: a loop heard repeating).
+      repeats(from, to, f0, f1, minLag, maxLag, window = 0.01) {
+        const b = banded(f0, f1);
+        const e = [];
+        for (let t = from; t + window <= to + 1e-9; t += window) e.push(meanSquare(b, t, t + window));
+        const m = e.reduce((a, v) => a + v, 0) / e.length;
+        const d = e.map((v) => v - m);
+        let best = -1;
+        for (let lag = Math.round(minLag / window); lag <= Math.round(maxLag / window) && lag < d.length - 10; lag++) {
+          let c = 0,
+            a = 0,
+            z = 0;
+          for (let i = 0; i + lag < d.length; i++) {
+            c += d[i] * d[i + lag];
+            a += d[i] * d[i];
+            z += d[i + lag] * d[i + lag];
+          }
+          best = Math.max(best, c / Math.sqrt(a * z + 1e-30));
+        }
+        return best;
       },
       spectrum: (from, to) => spectrum(channels, from, to),
     };
@@ -569,7 +706,7 @@
     const channels = [r.buffer.getChannelData(0), r.buffer.getChannelData(1)];
     const k = channels.map(kweight);
     const kp = channels.map((c) => kweight(phone(c)));
-    const out = { name: scene.name, kind: scene.kind, startMs: +r.startMs.toFixed(1), madeMs: r.madeMs === undefined ? undefined : Math.round(r.madeMs), baseNodes: r.baseNodes, shotNodes: r.shotNodes, bubbleNodes: r.bubbleNodes, maxLive: r.maxLive, nodes: r.nodes, bytes: r.bytes, updateUs: +r.updateUs.toFixed(1) };
+    const out = { name: scene.name, kind: scene.kind, startMs: +r.startMs.toFixed(1), madeMs: r.madeMs === undefined ? undefined : Math.round(r.madeMs), baseNodes: r.baseNodes, shotNodes: r.shotNodes, bubbleNodes: r.bubbleNodes, maxLive: r.maxLive, nodes: r.nodes, bytes: r.bytes, unbanked: r.unbanked, updateUs: +r.updateUs.toFixed(1) };
     let peak = 0;
     for (const c of channels) for (let i = 0; i < c.length; i++) peak = Math.max(peak, Math.abs(c[i]));
     out.peak = +(20 * Math.log10(peak + 1e-20)).toFixed(1);
@@ -610,7 +747,7 @@
     }
     // What the scene measures of its own (by name, for the checks).
     if (scene.measure) {
-      const extra = scene.measure(toolbox(channels, k, kp));
+      const extra = scene.measure(toolbox(channels, k, kp, r));
       for (const [key, v] of Object.entries(extra)) extra[key] = typeof v === "number" ? +v.toFixed(2) : v;
       out.extra = extra;
     }

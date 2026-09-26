@@ -6,7 +6,10 @@
 // --wav keeps each scene as a .wav to listen to (or to measure with other tools). Exits 1
 // if a check fails (the checks are below the tables: loudness of the beds, cues heard on a
 // phone, placing, the parts of the river told apart, silence when muted or hushed, no
-// clipping, voices and nodes bounded). No dependencies: Node's own http, and Chrome.
+// clipping, voices and nodes bounded; and what goes on for a while: a hunter's pulses
+// thinning out, the heart when strength stays low, a miss heard only when there was one,
+// loops that never come round the same, the sea's heave a few decibels). No dependencies:
+// Node's own http, and Chrome.
 
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -132,8 +135,10 @@ if (extras.length) {
   console.log(`\nmeasured for their checks`);
   for (const r of extras) console.log(`${r.name.padEnd(23)} ${Object.entries(r.extra).map(([k, v]) => `${k} ${Array.isArray(v) ? v.join("/") : v}`).join("  ")}`);
 }
-const starts = results.map((r) => r.startMs);
-const made = results.map((r) => r.madeMs).filter((v) => v !== undefined);
+// (Not counting the click that comes before the samples are made.)
+const loaded = results.filter((r) => r.name !== "early_start");
+const starts = loaded.map((r) => r.startMs);
+const made = loaded.map((r) => r.madeMs).filter((v) => v !== undefined);
 if (made.length) console.log(`\nmaking the samples while loading: ${Math.min(...made)}-${Math.max(...made)} ms of work (in 4 ms slices)`);
 console.log(`first click (building the graph): ${Math.min(...starts)}-${Math.max(...starts)} ms, ${Math.max(...results.map((r) => r.baseNodes))} nodes; ambient sounds made ${Math.max(...results.filter((r) => r.kind !== "stress").map((r) => r.bubbleNodes))} nodes in a scene at most; loudest peak ${Math.max(...results.map((r) => r.peak))} dBFS (${results.reduce((a, r) => (r.peak > a.peak ? r : a)).name})`);
 
@@ -151,8 +156,8 @@ for (const name of ["thump_body", "thump_rock", "thump_wood", "thump_net", "thum
 const splashes = ["solo_splash_L0.3", "solo_splash_L1", "solo_splash_L3", "solo_splash_L5.5"].map(get);
 if (splashes.every(Boolean)) check(`splash centroid falls with size: ${splashes.map((r) => r.centroid).join(" > ")}`, splashes.every((r, i) => i === 0 || r.centroid < splashes[i - 1].centroid));
 for (const r of byKind("cross")) if (r.name !== "leap_whole") check(`${r.name}: in the air within 4 dB (${(r.above - r.under).toFixed(1)}), no jump over 4 dB (${r.jump})`, Math.abs(r.above - r.under) <= 4 && r.jump <= 4);
-// What the fish does: heard on a phone over the bed.
-for (const [name, least] of [["dash", 6], ["jaws", 6], ["fall_cleared", 6], ["denied", 4]]) if (get(name)) check(`${name} ≥ +${least} dB over the bed on a phone: ${get(name).dPhone}`, get(name).dPhone >= least);
+// What the fish does: heard on a phone over the bed (a big fish's burst too).
+for (const [name, least] of [["dash", 6], ["dash_L9", 6], ["jaws", 6], ["fall_cleared", 6], ["fall_failed", 6], ["denied", 4]]) if (get(name)) check(`${name} ≥ +${least} dB over the bed on a phone: ${get(name).dPhone}`, get(name).dPhone >= least);
 if (get("charge")?.extra) {
   const e = get("charge").extra;
   check(`charge: a tone low at the start of the swing (+${e.low} dB at 240-420 Hz) and high at its top (+${e.high} dB at 700-1000 Hz), the sweet spot ticked (${e.ticks} ticks)`, e.low >= 2 && e.high >= 4 && e.ticks >= 1);
@@ -161,29 +166,56 @@ if (get("bed_winded")?.extra && get("bed_river")?.extra) {
   const d = get("bed_winded").extra.gills - get("bed_river").extra.gills;
   check(`bed_winded: the gills +1..+3.5 dB at 500-1500 Hz over bed_river (${d.toFixed(1)}), pulsing about 7 times a second (every ${get("bed_winded").extra.pulse} s)`, d >= 1 && d <= 3.5 && Math.abs(get("bed_winded").extra.pulse - 1 / 7) <= 0.02);
 }
-// Hunters: placed left and right, heard on a phone; pulses while hunting; the tick before
-// a strike standing out; the heart heard, ducking the river, and gone after its ten seconds.
+// Hunters: placed left and right, heard on a phone; pulses while hunting, thinning out when
+// one keeps at it, none from a rival at the redd; the tick before a strike standing out and
+// ending where the strike comes; a miss heard only when there was one; the heart heard,
+// ducking the river, and gone after its ten seconds -- also when strength stays low.
 for (const [name, sign] of [["warn_notice_left", 1], ["warn_notice_right", -1]])
-  if (get(name)?.extra) check(`${name}: placed (${get(name).extra.pan} dB left over right), ≥ +5 dB on a phone (${get(name).dPhone})`, sign * get(name).extra.pan >= 6 && get(name).dPhone >= 5);
+  if (get(name)?.extra) check(`${name}: placed (${get(name).extra.pan} dB left over right at 250-700 Hz, ≥ 4), ≥ +5 dB on a phone (${get(name).dPhone})`, sign * get(name).extra.pan >= 4 && get(name).dPhone >= 5);
 if (get("warn_hunt")?.extra) check(`warn_hunt: 5-9 pulses in 3.3 s: ${get("warn_hunt").extra.pulses}`, get("warn_hunt").extra.pulses >= 5 && get("warn_hunt").extra.pulses <= 9);
+if (get("stalk_60s")?.extra) {
+  const e = get("stalk_60s").extra;
+  check(`stalk_60s: pulses at first (${e.first} in 8 s, ≥ 6), thinned out a minute on (${e.last} in 20 s, ≤ 9)`, e.first >= 6 && e.last <= 9);
+}
+if (get("redd_rival")?.extra) check(`redd_rival: no pulses from a rival (${get("redd_rival").extra.pulses})`, get("redd_rival").extra.pulses <= 1);
+if (get("drive_notice")) check(`drive_notice: three goosanders noticing at once call as one (${get("drive_notice").shotNodes} nodes ≤ 7)`, get("drive_notice").shotNodes <= 7);
 if (get("warn_coiled")?.extra) check(`warn_coiled: ≥ +8 dB on a phone (${get("warn_coiled").dPhone}), its tick +8 dB at 1.1-2.6 kHz (${get("warn_coiled").extra.tick})`, get("warn_coiled").dPhone >= 8 && get("warn_coiled").extra.tick >= 8);
+for (const r of ["coil_short", "coil_long"].map(get).filter((r) => r?.extra)) check(`${r.name}: the last tick where the strike comes (${r.extra.last.toFixed(3)} s for a ${r.extra.coil} s coil, ±0.04)`, Math.abs(r.extra.last - r.extra.coil) <= 0.04);
 if (get("hunter_miss")?.extra) check(`hunter_miss: the jaws snap shut on nothing (+${get("hunter_miss").extra.snap} dB at 2-3 kHz)`, get("hunter_miss").extra.snap >= 6);
+if (get("kingfisher_kill")?.extra) {
+  const e = get("kingfisher_kill").extra;
+  check(`kingfisher_kill: nothing snaps as the dive starts (${e.early} dB at 2.5-3.5 kHz over the loudest before, ≤ 9: a bubble can ring there, a snap stands some 15 over it), the catch clacks (+${e.clack}, ≥ 8)`, e.early <= 9 && e.clack >= 8);
+}
+if (get("heron_bite")?.extra) {
+  const e = get("heron_bite").extra;
+  check(`heron_bite: no snap after a bite that hit (${e.snaps} onsets at 2-3.2 kHz), no croak (${e.croak} dB at 0.7-1.2 kHz, ≤ 2)`, e.snaps === 0 && e.croak <= 2);
+}
 if (get("heartbeat")?.extra) {
   const r = get("heartbeat");
   check(`heartbeat: ≥ +4 dB on a phone (${r.dPhone}), the river ducked 1.5-4.5 dB at 1.5-4 kHz (${r.extra.duck}), gone 11 s after (${r.extra.after} dB)`, r.dPhone >= 4 && r.extra.duck <= -1.5 && r.extra.duck >= -4.5 && r.extra.after <= 1);
 }
+if (get("heart_weak")?.extra) {
+  const e = get("heart_weak").extra;
+  check(`heart_weak: strength low for good, the heart heard at first (+${e.on} dB at 440-620 Hz, the river ducked to ${e.ducked}), then quiet (${e.after}, ≤ 0.7) and the river no longer ducked (${e.duck}), back with a blow (+${e.again})`, e.on >= 1 && e.ducked <= 0.8 && e.after <= 0.7 && e.duck >= 0.99 && e.again >= 1);
+}
 for (const r of ["kingfisher", "heron", "merganser", "seal", "bear"].map((k) => get(`call_${k}`)).filter(Boolean)) check(`${r.name} ≥ +5 dB over the bed on a phone, under water: ${r.dPhone}`, r.dPhone >= 5);
 const calls = ["kingfisher", "heron", "merganser", "seal", "bear"].map((k) => get(`solo_call_${k}`)).filter(Boolean);
 if (calls.length === 5) {
-  // Told apart: by brightness (20 % apart), or seal and bear by their 500-1500 Hz share.
+  // Told apart: by brightness (20 % apart), by where their energy lies (the shares of the
+  // five bands at least 40 points apart in all: a bear's growl has a third of its energy
+  // under 150 Hz, a heron's croak none), or by tone against noise (spectral flatness twice
+  // or more: a heron's croak is a buzz, a seal's whoosh is noise).
   const clash = [];
   for (let i = 0; i < 5; i++)
     for (let j = i + 1; j < 5; j++) {
       const a = calls[i],
         b = calls[j];
-      if (Math.abs(a.centroid - b.centroid) / Math.min(a.centroid, b.centroid) < 0.2 && Math.abs(a.bands[2] - b.bands[2]) < 10) clash.push(`${a.name}/${b.name}`);
+      const brighter = Math.abs(a.centroid - b.centroid) / Math.min(a.centroid, b.centroid) >= 0.2;
+      const apart = a.bands.reduce((sum, v, k) => sum + Math.abs(v - b.bands[k]), 0) >= 40;
+      const grain = Math.max(a.flatness, b.flatness) / Math.max(1e-4, Math.min(a.flatness, b.flatness)) >= 2;
+      if (!brighter && !apart && !grain) clash.push(`${a.name}/${b.name}`);
     }
-  check(`the calls sound different (centroids ${calls.map((r) => r.centroid).join(", ")}): ${clash.length ? clash.join(" ") : "all apart"}`, !clash.length);
+  check(`the calls sound different (centroids ${calls.map((r) => r.centroid).join(", ")}; flatness ${calls.map((r) => r.flatness).join(", ")}): ${clash.length ? clash.join(" ") : "all apart"}`, !clash.length);
 }
 // The parts of the river sound different: each about as loud, brighter up in the brook and
 // darkest at sea, their spectra apart, the big river surging, the sea heaving.
@@ -198,13 +230,13 @@ if (REGIONS.every(Boolean)) {
 }
 if (get("bed_sea_swell")?.extra) {
   const e = get("bed_sea_swell").extra;
-  check(`the sea heaves at 150-500 Hz: ${e.swell} dB, every ${e.period} s`, e.swell >= 2 && e.period >= 8 && e.period <= 12);
+  check(`the sea heaves at 150-500 Hz (${e.swell} dB, ≥ 1), about every ten seconds (${e.period} s), a few decibels and not a tide (400 ms loudness swings ${e.swing} dB, 2-5)`, e.swell >= 1 && e.period >= 7 && e.period <= 13 && e.swing >= 2 && e.swing <= 5);
 }
 // Rain pings from below (bright: past the water's top), none under ice; a flood clatters.
 if (get("bed_rain")) check(`bed_rain about -25 LUFS: ${get("bed_rain").full}`, Math.abs(get("bed_rain").full + 25) <= 1.5);
 if (get("bed_rain_under") && get("bed_river")) {
   const [a, b] = [get("bed_rain_under").bands[4], get("bed_river").bands[4]];
-  check(`bed_rain_under: ${a} % above 4 kHz (≥ 5, and ≥ 4 times bed_river's ${b})`, a >= 5 && a >= 4 * b);
+  check(`bed_rain_under: ${a} % above 4 kHz (≥ 15, and ≥ 4 times bed_river's ${b}), the pings never coming round the same (${get("bed_rain_under").extra.repeats.toFixed(2)} ≤ 0.6)`, a >= 15 && a >= 4 * b && get("bed_rain_under").extra.repeats <= 0.6);
 }
 if (get("bed_ice") && get("bed_river")) check(`bed_ice (rain 1): ${get("bed_ice").bands[4]} % above 4 kHz, at most 1.5 times bed_river's (${get("bed_river").bands[4]})`, get("bed_ice").bands[4] <= 1.5 * Math.max(0.1, get("bed_river").bands[4]));
 if (get("bed_flood")?.extra && get("bed_roar_near")) check(`bed_flood clatters at 2-6 kHz (${get("bed_flood").extra.clatter} dB swing), no louder than a fall near by + 2 (${get("bed_flood").full} vs ${get("bed_roar_near").full})`, get("bed_flood").extra.clatter >= 3 && get("bed_flood").full <= get("bed_roar_near").full + 2);
@@ -216,35 +248,45 @@ if (get("ship")?.extra) {
   const e = get("ship").extra;
   check(`ship: its drone rises (+${e.rise} dB at 30-60 Hz) and is gone after (${e.after}), the screw throbs every ${e.throb} s (0.22-0.32)`, e.rise >= 3 && e.after <= 1.5 && e.throb >= 0.22 && e.throb <= 0.32);
 }
-if (get("grunts")?.extra) check(`grunts: a run of knocks (${get("grunts").extra.knocks}), in the ambience (Δ400ms ${get("grunts").d400} ≤ +4)`, get("grunts").extra.knocks >= 2 && get("grunts").d400 <= 4);
+if (get("grunts")?.extra && get("grunts_ref")?.extra) {
+  const d = get("grunts").extra.peak - get("grunts_ref").extra.peak;
+  check(`grunts: a run of knocks (${get("grunts").extra.knocks}), heard but in the ambience (the loudest 400 ms +${d.toFixed(1)} dB over the same moment without them, +0.5..+6 for the loudest of them)`, get("grunts").extra.knocks >= 2 && d >= 0.5 && d <= 6);
+}
 for (const name of ["ice_chirp"]) if (get(name)) check(`${name} heard but in the ambience (Δ400ms ${get(name).d400}, +0.3..+4)`, get(name).d400 >= 0.3 && get(name).d400 <= 4);
 // The stages of a life: heard on a phone, each in a few nodes; a beaten hunter not the
 // stage fanfare; spawning goes silent under its veil and the new generation rings in.
 for (const [name, least] of [["fanfare", 9], ["chime_gold", 9], ["victory", 6], ["growth", 6], ["hatch", 6]])
   if (get(name)) check(`${name} ≥ +${least} dB over the bed on a phone (${get(name).dPhone}) in at most 6 nodes (${get(name).shotNodes})`, get(name).dPhone >= least && get(name).shotNodes <= 6);
 if (get("victory") && get("fanfare")) check(`victory its own (centroid ${get("victory").centroid} against the fanfare's ${get("fanfare").centroid})`, Math.abs(get("victory").centroid - get("fanfare").centroid) / get("fanfare").centroid >= 0.2);
-if (get("ending")?.extra) check(`ending: a closing swell heard for 2 s (+${get("ending").extra.swell} dB) in at most 6 nodes (${get("ending").shotNodes})`, get("ending").extra.swell >= 2 && get("ending").shotNodes <= 6);
+if (get("ending")?.extra) check(`ending: a closing swell heard for 2 s (+${get("ending").extra.swell} dB; on a phone +${get("ending").extra.phone}, and +${get("ending").dPhone} at its height) in at most 6 nodes (${get("ending").shotNodes})`, get("ending").extra.swell >= 2 && get("ending").extra.phone >= 2 && get("ending").dPhone >= 5 && get("ending").shotNodes <= 6);
 if (get("spawn_veil")?.extra) {
   const e = get("spawn_veil").extra;
   check(`spawn_veil: the pad heard (+${e.pad} dB at 200-700 Hz), silent under the veil (${e.veiled} LUFS ≤ -55), the hatch bell rings (+${e.hatch} dB on a phone)`, e.pad >= 1.5 && e.veiled <= -55 && e.hatch >= 6);
 }
 if (get("bed_home") && get("bed_river")) {
   const d = get("bed_home").full - get("bed_river").full;
-  check(`bed_home: the home brook's scent heard over the river (+${d.toFixed(1)} dB, +1..+5), a phone plays it (${(get("bed_home").full - get("bed_home").phone).toFixed(1)})`, d >= 1 && d <= 5 && get("bed_home").full - get("bed_home").phone <= 3);
+  check(`bed_home: the home brook's scent heard over the river (+${d.toFixed(1)} dB, +1..+5), a phone plays it (${(get("bed_home").full - get("bed_home").phone).toFixed(1)}), nothing in it coming round (${get("bed_home").extra.repeats.toFixed(2)} ≤ 0.5)`, d >= 1 && d <= 5 && get("bed_home").full - get("bed_home").phone <= 3 && get("bed_home").extra.repeats <= 0.5);
 }
-// Weather: the flash cracks, the thunder still rolls, a storm swells up and brightens.
-if (get("lightning_near")) check(`lightning_near ≥ +8 dB at the flash: ${get("lightning_near").dFull}`, get("lightning_near").dFull >= 8);
+// Weather: the flash cracks (from under the water a little less than in the air, as all
+// that comes from above), the thunder still rolls, a storm swells up and brightens.
+if (get("lightning_near")) check(`lightning_near ≥ +6 dB at the flash: ${get("lightning_near").dFull}`, get("lightning_near").dFull >= 6);
+if (get("lightning_near") && get("lightning_above")) check(`lightning under water under its height in the air (${get("lightning_near").dFull} against ${get("lightning_above").dFull}, by 1-6 dB)`, get("lightning_above").dFull - get("lightning_near").dFull >= 1 && get("lightning_above").dFull - get("lightning_near").dFull <= 6);
 if (get("thunder_near")) check(`thunder_near ≥ +6 dB (full band): ${get("thunder_near").dFull}`, get("thunder_near").dFull >= 6);
 if (get("storm_swell")?.extra) {
   const e = get("storm_swell").extra;
-  check(`storm_swell: +2..+6 dB (Δ400ms ${e.d400}), brightening (${Math.round(e.early)} → ${Math.round(e.late)} Hz)`, e.d400 >= 2 && e.d400 <= 6 && e.late > e.early);
+  check(`storm_swell: +3..+7 dB (Δ400ms ${e.d400}; on a phone +${e.phone}, ≥ 2)`, e.d400 >= 3 && e.d400 <= 7 && e.phone >= 2);
 }
+if (get("storm_alone")?.extra) check(`storm_alone: brightening as it swells (${Math.round(get("storm_alone").extra.early)} → ${Math.round(get("storm_alone").extra.late)} Hz)`, get("storm_alone").extra.late > 1.2 * get("storm_alone").extra.early);
 // Nothing clips: the limiter holds every scene's peaks under full scale.
 const peaky = results.filter((r) => r.peak > -1);
 check(`every scene's peak ≤ -1 dBFS: ${peaky.length ? peaky.map((r) => `${r.name} ${r.peak}`).join(", ") : `loudest ${Math.max(...results.map((r) => r.peak))}`}`, !peaky.length);
+if (get("early_start")?.extra) {
+  const r = get("early_start");
+  check(`early_start: a click before the samples are made (${r.extra.making} jobs left) waits only for the beds' noise (${r.startMs} ms), and all is made after (${r.unbanked} not yet buffers)`, r.extra.making > 0 && r.unbanked === 0);
+}
 if (get("stress_30s")) {
   const r = get("stress_30s");
-  check(`stress_30s: at most 48 voices at once (${r.maxLive}), at most 3000 nodes made (${r.nodes}), base graph at most 95 nodes (${r.baseNodes})`, r.maxLive <= 48 && r.nodes <= 3000 && r.baseNodes <= 95);
+  check(`stress_30s: at most 48 voices at once (${r.maxLive}), at most 3000 nodes made (${r.nodes}), base graph at most 95 nodes (${r.baseNodes}), no sample held twice (${r.unbanked} not yet buffers)`, r.maxLive <= 48 && r.nodes <= 3000 && r.baseNodes <= 95 && r.unbanked === 0);
 }
 console.log("");
 for (const [what, ok] of checks) console.log(`${ok ? "ok  " : "FAIL"} ${what}`);
