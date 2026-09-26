@@ -27,13 +27,14 @@ export function ping(left, right, at, f, tau, amp, pan = 0) {
     y1 = y;
   }
 }
-// A loop `seconds` long that repeats without a seam: `fill` makes a little more than that,
-// and what runs over is faded into the start (play it from 0).
-function looped(seconds, channels, fill, fade = 0.12) {
+// A loop `seconds` long that repeats without a seam: `fill` makes a little more than that
+// (a generator: it yields now and then, so that the work is spread over the loading), and
+// what runs over is faded into the start (play it from 0).
+function* looped(seconds, channels, fill, fade = 0.12) {
   const length = Math.floor(seconds * RATE),
     over = Math.floor(fade * RATE);
   const data = Array.from({ length: channels }, () => new Float32Array(length + over));
-  fill(...data);
+  yield* fill(...data);
   return data.map((d) => {
     for (let i = 0; i < over; i++) {
       const t = i / over;
@@ -58,21 +59,24 @@ export function makeGravel() {
 }
 // Rain heard from under the water: each drop striking the surface rings a small bubble,
 // a ping at 6.5-14 kHz (most at 9-12) gone in a few milliseconds, some 500 of them a second
-// at full rain, over a faint hiss high up. 2 s, looped.
-export function makeRainPings() {
-  return looped(2, 2, (l, r) => {
+// at full rain, over a faint hiss high up. 2 s, looped (and played twice over at two
+// speeds, see src/sound.js, so that its pattern never comes round the same). The drops are
+// all much of a strength: a few loud ones would be heard coming round again.
+export function* makeRainPings() {
+  return yield* looped(2, 2, function* (l, r) {
     const count = Math.round(2.12 * 500);
     for (let k = 0; k < count; k++) {
       const u = Math.random();
       const f = u < 0.7 ? random(9000, 12000) : u < 0.85 ? random(6500, 9000) : random(12000, 14000);
-      const a = Math.random();
-      ping(l, r, Math.random() * 2.1, f, random(0.0015, 0.005), 0.5 * a * a, random(-0.9, 0.9));
+      ping(l, r, Math.random() * 2.1, f, random(0.0015, 0.005), 0.1 + 0.3 * Math.pow(Math.random(), 1.5), random(-0.9, 0.9));
+      if (k % 200 === 199) yield;
     }
     const top = biquad("bandpass", 11300, 1.4),
       top2 = biquad("bandpass", 11300, 1.4);
     for (let i = 0; i < l.length; i++) {
       l[i] += 0.012 * top.run(white());
       r[i] += 0.012 * top2.run(white());
+      if ((i & 32767) === 32767) yield;
     }
   });
 }
@@ -118,8 +122,8 @@ export function makeChirp() {
 // A ship far off at sea: its engine's drone (44 Hz and its overtones) throbbing with the
 // screw's blades, 3.75 times a second, and the hiss of the water they tear (300-900 Hz,
 // where a phone hears the throb). 4 s, looped: a whole number of both in it.
-export function makeShip() {
-  return looped(4, 1, (d) => {
+export function* makeShip() {
+  return yield* looped(4, 1, function* (d) {
     const band = biquad("bandpass", 520, 0.9);
     // (One turn of the drone, looked up by phase.)
     const turn = new Float32Array(2048);
@@ -131,23 +135,29 @@ export function makeShip() {
       const throb = 0.55 + 0.45 * Math.sin(2 * Math.PI * 3.75 * t);
       const v = turn[Math.floor(((44 * t) % 1) * turn.length)];
       d[i] = 0.25 * v * (0.8 + 0.2 * throb) + 0.35 * throb * throb * band.run(white());
+      if ((i & 32767) === 32767) yield;
     }
   }, 0);
 }
 // Fish grunting at night (cod and their kin): a short run of 4-9 knocks, 18-25 a second,
-// each a low ring at 150-300 Hz.
+// each a low ring at 150-300 Hz with a little of its overtone.
 export function makeGrunt() {
   const n = 4 + Math.floor(Math.random() * 6);
   const rate = random(18, 25),
     f = random(150, 300);
   const [l, r] = stereo(n / rate + 0.05);
   const pan = random(-0.8, 0.8);
-  for (let k = 0; k < n; k++) ping(l, r, k / rate, f * random(0.95, 1.05), 0.008, 0.6 * Math.min(1, (k + 1) / 2), pan);
+  for (let k = 0; k < n; k++) {
+    const g = f * random(0.95, 1.05),
+      a = 0.6 * Math.min(1, (k + 1) / 2);
+    ping(l, r, k / rate, g, 0.008, a, pan);
+    ping(l, r, k / rate, 2.3 * g, 0.004, 0.3 * a, pan);
+  }
   return [fadeOut(l), fadeOut(r)];
 }
 
-// The chord under the home brook's gurgle, A3 E4 A4, looked up by the phase of A3 (two turns
-// of A3 are three of E4 and four of A4).
+// The chord of the home brook's scent, A3 E4 A4, looked up by the phase of A3 (two turns of
+// A3 are three of E4 and four of A4).
 const CHORD = (() => {
   const size = 1 << 14,
     table = new Float32Array(size);
@@ -157,38 +167,24 @@ const CHORD = (() => {
   }
   return (turns) => table[Math.floor(((turns / 2) % 1) * size)];
 })();
-// The scent of the home brook, for a spawner on its way back: the brook's own bright
-// gurgling (600-1500 Hz) and under it a soft chord, A3 E4 A4, the top note beating slowly.
-// 4 s, looped (every tone a whole number of turns in it).
-export function makeHome() {
-  // (One channel: a drone needs no more, and it is made in half the time.)
-  return looped(4, 1, (d) => {
-    for (const seed of [0]) {
-      const [b0, b1, b2] = [700, 1000, 1400].map((f) => biquad("bandpass", f * random(0.95, 1.05), 3));
-      let s0 = 0,
-        s1 = 0,
-        s2 = 0;
-      // (And A4 once more, half a hertz higher, beating slowly against the chord's: a sine
-      // run by a resonator that never dies away.)
-      const w = (2 * Math.PI * 440.5) / RATE,
-        c = 2 * Math.cos(w);
-      let y1 = Math.sin(w),
-        y2 = 0;
-      for (let i = 0; i < d.length; i++) {
-        const t = i / RATE;
-        // (Each band swelling and falling at its own pace, as eddies do; worked out every
-        // 32 samples, which is plenty for so slow a swell.)
-        if ((i & 31) === 0) {
-          s0 = Math.pow(0.5 + 0.5 * Math.sin(2 * Math.PI * 0.5 * t + seed), 3);
-          s1 = Math.pow(0.5 + 0.5 * Math.sin(2 * Math.PI * 0.75 * t + seed + 2), 3);
-          s2 = Math.pow(0.5 + 0.5 * Math.sin(2 * Math.PI * t + seed + 4), 3);
-        }
-        const v = s0 * b0.run(white()) + s1 * b1.run(white()) + s2 * b2.run(white());
-        d[i] = 0.12 * v + 0.06 * (CHORD((220 * i) / RATE) + 0.25 * y1);
-        const y = c * y1 - y2;
-        y2 = y1;
-        y1 = y;
-      }
+// The scent of the home brook, for a spawner on its way back: a soft chord, A3 E4 A4, the
+// top note beating slowly against A4 once more half a hertz higher. 2 s, looped (every tone
+// a whole number of turns in it). src/sound.js plays it twice, the second a fourth up, the
+// two swelling and giving way to each other slowly; the brook's gurgling over it is the
+// river's own, brighter (see update() there): nothing in it comes round every few seconds.
+export function* makeHome() {
+  return yield* looped(2, 1, function* (d) {
+    // (A4 half a hertz up: a sine run by a resonator that never dies away.)
+    const w = (2 * Math.PI * 440.5) / RATE,
+      c = 2 * Math.cos(w);
+    let y1 = Math.sin(w),
+      y2 = 0;
+    for (let i = 0; i < d.length; i++) {
+      d[i] = 0.06 * (CHORD((220 * i) / RATE) + 0.25 * y1);
+      const y = c * y1 - y2;
+      y2 = y1;
+      y1 = y;
+      if ((i & 32767) === 32767) yield;
     }
   });
 }
@@ -265,19 +261,23 @@ export function* makeWorld(raw) {
   raw.gravel = many(12, makeGravel);
   raw.clatter = many(4, makeClatter);
   yield;
-  raw.pings = many(1, makeRainPings, false);
+  raw.pings = [yield* makeRainPings()];
   yield;
   raw.chirp = many(4, makeChirp);
+  yield;
   raw.grunt = many(6, makeGrunt);
   yield;
-  raw.ship = many(1, makeShip);
+  raw.ship = [half(yield* makeShip())];
   yield;
-  raw.home = many(1, makeHome);
+  raw.home = [half(yield* makeHome())];
   yield;
   raw.crack = many(3, makeCrack, false);
+  yield;
   raw.slap = many(3, makeSlap);
   raw.creak = many(2, makeCreak);
+  yield;
   raw.plops = many(2, makePlops);
+  yield;
   raw.counter = many(1, makeCounter);
   yield;
 }

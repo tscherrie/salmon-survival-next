@@ -368,12 +368,18 @@ export function makeReel() {
 }
 
 // Work done ahead, a slice at a time, so that neither the loading nor the first click
-// stalls on it; whatever is left when the sound is wanted is finished then and there.
+// stalls on it. (Each job yields every few milliseconds of work: a slice ends at the first
+// yield after its 4 ms.) What must be there when the sound starts is finished then and
+// there; the rest goes on being made in slices.
 export function createWorkshop() {
   const jobs = [];
+  const waiting = [];
   let timer = null;
   // (How long it has worked in all, for the checks.)
   let spent = 0;
+  function done() {
+    while (!jobs.length && waiting.length) waiting.shift()();
+  }
   function slice() {
     timer = null;
     const from = performance.now(),
@@ -381,16 +387,24 @@ export function createWorkshop() {
     while (jobs.length && performance.now() < until) if (jobs[0].next().done) jobs.shift();
     spent += performance.now() - from;
     if (jobs.length) timer = setTimeout(slice, 0);
+    else done();
   }
   return {
     add(job) {
       jobs.push(job);
       if (!timer) timer = setTimeout(slice, 0);
     },
-    finish() {
+    // Worked on now until `enough()` says so (to the end if not said).
+    finish(enough = () => false) {
       const from = performance.now();
-      while (jobs.length) if (jobs[0].next().done) jobs.shift();
+      while (jobs.length && !enough()) if (jobs[0].next().done) jobs.shift();
       spent += performance.now() - from;
+      done();
+    },
+    // `callback` once everything is made (at once if it is already).
+    whenDone(callback) {
+      waiting.push(callback);
+      done();
     },
     get left() {
       return jobs.length;

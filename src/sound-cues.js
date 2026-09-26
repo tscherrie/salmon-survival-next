@@ -26,14 +26,23 @@ export function makeJaws() {
   return [fadeOut(d, 0.01)];
 }
 // No breath left for a burst: a dull, short thud (led by 330 Hz, so a phone has it).
-// `low` lowers it all for the heavier thud of a leap that fell short.
-export function makeDenied(low = 1) {
-  const d = mono(0.45 / low);
-  ring(d, 0, random(105, 115) * low, 0.05 / low, 0.35);
-  ring(d, 0, random(315, 345) * low, 0.025 / low, 0.8);
-  hiss(d, 0, "bandpass", 480 * low, 0.75, 0.02 / low, 0.2);
-  if (low < 1) ring(d, 0, 70, 0.12, 0.5);
-  return [fadeOut(dull(d, 1800 * low))];
+export function makeDenied() {
+  const d = mono(0.45);
+  ring(d, 0, random(105, 115), 0.05, 0.35);
+  ring(d, 0, random(315, 345), 0.025, 0.8);
+  hiss(d, 0, "bandpass", 480, 0.75, 0.02, 0.2);
+  return [fadeOut(dull(d, 1800))];
+}
+// A leap that fell short: the heavy thud of falling back into the pool -- the body's deep
+// knock (70 and 110 Hz) and the slap of it on the water at 380-460 Hz, which is what a
+// phone plays of it.
+export function makeThud() {
+  const d = mono(0.6);
+  ring(d, 0, 70, 0.12, 0.5);
+  ring(d, 0, random(100, 115), 0.06, 0.35);
+  ring(d, 0, random(380, 430), 0.035, 0.8, 0.85);
+  hiss(d, 0, "bandpass", random(420, 480), 0.9, 0.03, 0.3);
+  return [fadeOut(dull(d, 1500))];
 }
 // Out of breath: a gasp drawn in (700-1800 Hz, swelling, then cut off).
 export function makeGasp() {
@@ -256,6 +265,37 @@ export function makeBear() {
 
 // ---- The stingers: the stages of a life.
 
+// A death with no captor to be heard (worn out, starved, the angler's, the net's): a low
+// swell closing over it, rising for a second and dying away over two -- deep noise
+// darkening from 300 to 80 Hz, a hum falling from 70 to 45 Hz, and over them a band of
+// noise sinking from 560 to 260 Hz, which is what a phone plays of it. (Yielding now and
+// then: see createWorkshop in src/sound-make.js.)
+export function* makeEnding() {
+  const d = mono(3.2);
+  const mid = biquad("bandpass", 560, 1.1);
+  let brown = 0,
+    low = 0,
+    k = 0,
+    phase = 0;
+  for (let i = 0; i < 3.1 * RATE; i++) {
+    const t = i / RATE;
+    const u = Math.min(1, t / 3);
+    if ((i & 31) === 0) {
+      // (The deep noise through a plain one-pole lowpass, whose level does not change as
+      // it darkens.)
+      k = 1 - Math.exp((-2 * Math.PI * 300 * Math.pow(80 / 300, u)) / RATE);
+      mid.set(560 * Math.pow(260 / 560, u), 1.1);
+    }
+    const e = t < 1 ? t : Math.exp(-(t - 1) / 0.35);
+    brown = (brown + 0.02 * white()) / 1.02;
+    low += k * (brown - low);
+    phase += (70 * Math.pow(45 / 70, u)) / RATE;
+    d[i] = e * (3 * low + 0.35 * Math.sin(2 * Math.PI * phase) + 0.25 * mid.run(white()));
+    if ((i & 32767) === 32767) yield;
+  }
+  return [fadeOut(d, 0.1)];
+}
+
 // A bell's note into a pair of channels at `pan`: partials [ratio, level], rising in 12 ms
 // and dying away over `hold` seconds (to about a five-hundredth).
 // (Each partial a damped sine made by a two-pole resonator: no sine or exponential per
@@ -295,8 +335,9 @@ const HERON = wave(Array.from({ length: 12 }, (_, n) => 1 / (n + 1)));
 const GROWL = wave(Array.from({ length: 10 }, (_, n) => 1 / (n + 1)));
 const BRASS = wave(Array.from({ length: 6 }, (_, n) => 1 / (n + 1)));
 // A new stage of life: a soft swell of noise sweeping up under a rising run of bell tones,
-// C E G C E, the last held, spread from left to right.
-export function makeFanfare() {
+// C E G C E, the last held, spread from left to right. (Yielding now and then: see
+// createWorkshop in src/sound-make.js.)
+export function* makeFanfare() {
   const l = mono(3),
     r = mono(3);
   const band = biquad("bandpass", 300, 0.7),
@@ -311,15 +352,17 @@ export function makeFanfare() {
     const e = 0.12 * (t < 0.5 ? t / 0.5 : Math.exp(-(t - 0.5) / 0.28));
     l[i] += 0.5 * e * band.run(white());
     r[i] += 0.5 * e * band2.run(white());
+    if ((i & 32767) === 32767) yield;
   }
   const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
-  notes.forEach((f, i) =>
-    note(l, r, 0.12 + i * 0.13, f, i === notes.length - 1 ? 2.2 : 0.9, [
+  for (let i = 0; i < notes.length; i++) {
+    note(l, r, 0.12 + i * 0.13, notes[i], i === notes.length - 1 ? 2.2 : 0.9, [
       [1, 0.16],
       [2.01, 0.05],
       [3.02, 0.018],
-    ], (i / (notes.length - 1)) * 0.8 - 0.4),
-  );
+    ], (i / (notes.length - 1)) * 0.8 - 0.4);
+    yield;
+  }
   return [fadeOut(l, 0.1), fadeOut(r, 0.1)];
 }
 // A badge: two or three quick bell tones up, three and brighter for a gold one.
@@ -386,8 +429,9 @@ export function* makeCues(raw) {
   raw.whump = many(2, makeWhump);
   raw.jaws = many(4, makeJaws);
   yield;
-  raw.denied = many(2, () => makeDenied());
-  raw.thud = many(2, () => makeDenied(0.7));
+  raw.denied = many(2, makeDenied);
+  raw.thud = many(2, makeThud);
+  yield;
   raw.gasp = many(2, makeGasp);
   yield;
   raw.gills = many(1, makeGills);
@@ -405,13 +449,16 @@ export function* makeCues(raw) {
   raw.heron = many(2, makeHeron);
   yield;
   raw.merganser = many(2, makeMerganser);
+  yield;
   raw.sealWhoosh = many(2, makeSealWhoosh);
   yield;
   raw.sealMoan = many(1, makeSealMoan);
   raw.bear = many(2, makeBear);
   yield;
-  raw.fanfare = many(1, makeFanfare);
+  raw.fanfare = [half(yield* makeFanfare())];
+  yield;
   raw.gulp = many(2, makeGulp);
+  yield;
   raw.otter = many(3, makeOtter, false);
   yield;
   for (const tier of ["bronze", "silver", "gold"]) raw[`chime-${tier}`] = many(1, () => makeChime(tier));
@@ -419,5 +466,7 @@ export function* makeCues(raw) {
   raw.growth = many(1, makeGrowth);
   yield;
   raw.hatch = many(1, makeHatch);
+  yield;
+  raw.ending = [half(yield* makeEnding())];
   yield;
 }
