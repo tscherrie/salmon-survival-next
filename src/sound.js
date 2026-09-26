@@ -292,15 +292,16 @@ export function createSound() {
     compressor.ratio.value = 3;
     // The limiter: hard and fast over the last few decibels, so that nothing clips however
     // much comes at once. (A browser's compressor adds back what it takes at full scale --
-    // about 2.3 dB for this one -- so the trim before it takes that off again first, and
-    // everything under its threshold passes as it was.)
+    // about 2.9 dB for this one -- so the trim before it takes that off again first, and
+    // everything under its threshold passes as it was. Its ceiling is about -2 dBFS; what
+    // gets past it before it catches up stays under -1.)
     const limiter = context.createDynamicsCompressor();
-    limiter.threshold.value = -4;
+    limiter.threshold.value = -5;
     limiter.knee.value = 0;
     limiter.ratio.value = 20;
     limiter.attack.value = 0.001;
     limiter.release.value = 0.08;
-    master.connect(compressor).connect(amp(0.77)).connect(limiter).connect(context.destination);
+    master.connect(compressor).connect(amp(0.72)).connect(limiter).connect(context.destination);
     // Everything but the bells: closed by the white veil of spawning.
     const world = amp(1);
     world.connect(master);
