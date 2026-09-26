@@ -1,0 +1,349 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Sound check</title>
+<!--
+  The game's sound (src/sound.js) rendered offline, scene by scene, and measured: loudness
+  (BS.1770, ungated), loudness through a phone's small speaker (nothing under 250 Hz), how
+  far a one-shot stands out over the bed, the brightness (spectral centroid) of a sound on
+  its own. Run by tools/sound-check.mjs; open it by hand and call runAll() to look at it.
+  (The scenes also run against an older src/sound.js, for a before and after: what it did
+  not have yet is called with ?. and it is told `above` as well as `submerged`.)
+-->
+<script type="module">
+  import { createSound } from "../src/sound.js";
+
+  const SR = 48000;
+  let seconds = 8;
+  let current = null;
+  const NODES = ["createOscillator", "createGain", "createBiquadFilter", "createBufferSource", "createStereoPanner", "createDynamicsCompressor", "createIIRFilter", "createConstantSource", "createWaveShaper", "createDelay", "createConvolver"];
+  // An offline context the sound takes for the real thing: always "running", counting the
+  // nodes made on it, and keeping its looping sources (so a scene can silence the beds).
+  class Offline extends OfflineAudioContext {
+    constructor() {
+      super(2, SR * seconds, SR);
+      this.count = 0;
+      this.sources = [];
+      current = this;
+      for (const name of NODES) {
+        const make = OfflineAudioContext.prototype[name] ?? BaseAudioContext.prototype[name];
+        if (!make) continue;
+        this[name] = (...args) => {
+          this.count++;
+          const node = make.apply(this, args);
+          if (name === "createBufferSource") this.sources.push(node);
+          return node;
+        };
+      }
+    }
+    get state() {
+      return "running";
+    }
+    // (The sound lets the device go when silent; offline there is none.)
+    suspend(at) {
+      return at === undefined ? Promise.resolve() : super.suspend(at);
+    }
+  }
+  window.AudioContext = Offline;
+
+  const bed = { rain: 0, daylight: 1, stir: 0, roar: 0, sea: 0, submerged: 1, depth: 1 };
+  const shot = (name, fire, params = {}) => ({ name, kind: "shot", params, events: [[4, fire]] });
+  // On its own (the beds stopped), four times over: its sound is different every time.
+  const solo = (name, fire, params = {}) => ({ name, kind: "solo", params, events: [1, 2.5, 4, 5.5].map((t) => [t, fire]) });
+  const air = (t) => (t >= 4 && t < 6 ? 0 : 1);
+  const SCENES = [
+    { name: "bed_river", kind: "bed", params: {} },
+    { name: "bed_river_night", kind: "bed", params: { daylight: 0 } },
+    { name: "bed_river_stir", kind: "bed", params: { stir: 1 } },
+    { name: "bed_roar_near", kind: "bed", params: { roar: 1 } },
+    { name: "bed_rain", kind: "bed", params: { rain: 1 } },
+    { name: "bed_sea_deep", kind: "bed", params: { sea: 1, depth: 40 } },
+    { name: "bed_above", kind: "bed", params: { submerged: 0 } },
+    { name: "bed_above_roar", kind: "bed", params: { submerged: 0, roar: 1 } },
+    { name: "bed_above_rain", kind: "bed", params: { submerged: 0, rain: 1 } },
+    { name: "cross_river", kind: "cross", params: (t) => ({ submerged: air(t) }) },
+    { name: "cross_roar", kind: "cross", params: (t) => ({ submerged: air(t), roar: 1 }) },
+    { name: "cross_rain", kind: "cross", params: (t) => ({ submerged: air(t), rain: 1 }) },
+    { name: "cross_sea", kind: "cross", params: (t) => ({ submerged: air(t), sea: 1, depth: 3 }) },
+    {
+      name: "leap_whole",
+      kind: "cross",
+      params: (t) => ({ submerged: t >= 4.1 && t < 5.1 ? 0 : 1 }),
+      events: [
+        [4, (s) => s.leap(1.2)],
+        [5.05, (s) => (s.splash(0.9, 1.2), s.dive?.(1.2))],
+      ],
+    },
+    {
+      name: "muted_then_leap",
+      kind: "silent",
+      params: (t) => ({ submerged: t >= 4.1 && t < 5.1 ? 0 : 1, roar: 1, rain: 1 }),
+      events: [
+        [1, (s) => s.toggle()],
+        [4, (s) => s.leap(1.2)],
+        [5.05, (s) => (s.splash(0.9, 1.2), s.dive?.(1.2), s.call())],
+      ],
+    },
+    { name: "hushed_then_chime", kind: "silent", params: {}, events: [[1, (s) => s.hush(true)], [4, (s) => (s.chime("gold"), s.fanfare(), s.thump(), s.splash(1.2, 3))]] },
+    { name: "hidden_then_thunder", kind: "silent", params: {}, events: [[1, (s) => s.hush(true, "hidden")], [4, (s) => (s.thunder(1), s.otter(), s.reel())]] },
+    shot("thump_body", (s) => s.thump("body")),
+    shot("thump_rock", (s) => s.thump("rock")),
+    shot("thump_wood", (s) => s.thump("wood")),
+    shot("thump_net", (s) => s.thump("net")),
+    shot("thump_hook", (s) => s.thump("hook")),
+    shot("nip", (s) => s.nip()),
+    shot("swallow_small", (s) => s.swallow(0.1)),
+    shot("swallow_big", (s) => s.swallow(0.9)),
+    shot("splash_1", (s) => s.splash(1, 1)),
+    shot("splash_fish_L3", (s) => s.splash(1, 3)),
+    shot("leap", (s) => s.leap(1)),
+    shot("dive", (s) => s.dive?.(1)),
+    shot("rise_5", (s) => s.rise(5)),
+    shot("call", (s) => s.call()),
+    shot("otter", (s) => s.otter()),
+    shot("reel", (s) => s.reel()),
+    shot("snap", (s) => s.snap()),
+    shot("thunder_near", (s) => s.thunder(1)),
+    shot("thunder_far", (s) => s.thunder(0.1)),
+    shot("eaten_fish", (s) => s.eaten("fish")),
+    shot("eaten_bird", (s) => s.eaten("bird")),
+    shot("fanfare", (s) => s.fanfare()),
+    shot("chime_gold", (s) => s.chime("gold")),
+    solo("solo_splash_L0.3", (s) => s.splash(1, 0.3)),
+    solo("solo_splash_L1", (s) => s.splash(1, 1)),
+    solo("solo_splash_L3", (s) => s.splash(1, 3)),
+    solo("solo_splash_L5.5", (s) => s.splash(1, 5.5)),
+    solo("solo_splash_L5.5_above", (s) => s.splash(1, 5.5), { submerged: 0 }),
+    solo("solo_leap", (s) => s.leap(1)),
+    solo("solo_dive_L1", (s) => s.dive?.(1)),
+    solo("solo_dive_L5", (s) => s.dive?.(5)),
+  ];
+
+  async function render(scene) {
+    seconds = scene.seconds ?? 8;
+    try {
+      localStorage.removeItem("habitat-sound");
+    } catch {}
+    const sound = createSound();
+    // As in the game: the sound object exists a while (the loading) before the first click.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const t0 = performance.now();
+    sound.start();
+    const startMs = performance.now() - t0;
+    const ctx = current;
+    const baseNodes = ctx.count;
+    const params = (t) => {
+      const p = { ...bed, ...(typeof scene.params === "function" ? scene.params(t) : scene.params) };
+      // (For the sound as it was, which only knew above or not.)
+      p.above = p.submerged < 0.5;
+      return p;
+    };
+    const dt = 1 / 30;
+    const events = [...(scene.events ?? [])];
+    let shotNodes = 0;
+    let bubbleNodes = 0;
+    sound.update(dt, params(0));
+    for (let i = 1; i < seconds / dt - 1; i++) {
+      const t = i * dt;
+      OfflineAudioContext.prototype.suspend.call(ctx, t).then(() => {
+        if (i === 3 && scene.kind === "solo") for (const s of ctx.sources) if (s.loop) s.stop();
+        while (events.length && events[0][0] <= t + 1e-6) {
+          const before = ctx.count;
+          events.shift()[1](sound);
+          shotNodes += ctx.count - before;
+        }
+        const before = ctx.count;
+        sound.update(dt, params(t));
+        bubbleNodes += ctx.count - before;
+        ctx.resume();
+      });
+    }
+    const buffer = await ctx.startRendering();
+    return { buffer, startMs, baseNodes, shotNodes, bubbleNodes, live: sound.stats?.live };
+  }
+
+  // ---- Measuring.
+  function biquad(x, b, a) {
+    const y = new Float32Array(x.length);
+    let x1 = 0,
+      x2 = 0,
+      y1 = 0,
+      y2 = 0;
+    for (let i = 0; i < x.length; i++) {
+      const v = b[0] * x[i] + b[1] * x1 + b[2] * x2 - a[1] * y1 - a[2] * y2;
+      x2 = x1;
+      x1 = x[i];
+      y2 = y1;
+      y1 = v;
+      y[i] = v;
+    }
+    return y;
+  }
+  // BS.1770 K-weighting at 48 kHz.
+  const kweight = (x) => biquad(biquad(x, [1.53512485958697, -2.69169618940638, 1.19839281085285], [1, -1.69065929318241, 0.73248077421585]), [1, -2, 1], [1, -1.99004745483398, 0.99007225036621]);
+  // A phone's speaker: nothing much under 250 Hz (a fourth-order Butterworth highpass).
+  function highpass(x, f, q) {
+    const w = (2 * Math.PI * f) / SR,
+      cos = Math.cos(w),
+      alpha = Math.sin(w) / (2 * q),
+      a0 = 1 + alpha;
+    return biquad(x, [(1 + cos) / 2 / a0, -(1 + cos) / a0, (1 + cos) / 2 / a0], [1, (-2 * cos) / a0, (1 - alpha) / a0]);
+  }
+  const phone = (x) => highpass(highpass(x, 250, 0.5412), 250, 1.3066);
+  const db = (ms) => -0.691 + 10 * Math.log10(ms + 1e-20);
+  // Loudness of [from, to) seconds, both channels K-weighted already.
+  function meanSquare(ks, from, to) {
+    let sum = 0;
+    const a = Math.floor(from * SR),
+      b = Math.floor(to * SR);
+    for (const k of ks) {
+      let s = 0;
+      for (let i = a; i < b; i++) s += k[i] * k[i];
+      sum += s / (b - a);
+    }
+    return sum;
+  }
+  const loud = (ks, from, to) => db(meanSquare(ks, from, to));
+  // The loudest `window` seconds in [from, to), and the series of them.
+  function series(ks, from, to, window) {
+    const out = [];
+    for (let t = from; t + window <= to + 1e-9; t += window / 4) out.push(loud(ks, t, t + window));
+    return out;
+  }
+  const loudest = (ks, from, to, window) => Math.max(...series(ks, from, to, window));
+  const mean = (list) => 10 * Math.log10(list.reduce((s, v) => s + Math.pow(10, v / 10), 0) / list.length);
+  // Spectral centroid and share of energy per band over [from, to), both channels summed.
+  function spectrum(channels, from, to) {
+    const a = Math.floor(from * SR),
+      n0 = Math.floor((to - from) * SR);
+    let n = 1;
+    while (n < n0) n <<= 1;
+    const re = new Float64Array(n),
+      im = new Float64Array(n);
+    for (let i = 0; i < n0; i++) re[i] = ((channels[0][a + i] + channels[1][a + i]) / 2) * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n0 - 1)));
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) {
+        [re[i], re[j]] = [re[j], re[i]];
+        [im[i], im[j]] = [im[j], im[i]];
+      }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = (-2 * Math.PI) / len,
+        wr = Math.cos(ang),
+        wi = Math.sin(ang);
+      for (let i = 0; i < n; i += len) {
+        let cr = 1,
+          ci = 0;
+        for (let k = 0; k < len / 2; k++) {
+          const ur = re[i + k],
+            ui = im[i + k];
+          const vr = re[i + k + len / 2] * cr - im[i + k + len / 2] * ci;
+          const vi = re[i + k + len / 2] * ci + im[i + k + len / 2] * cr;
+          re[i + k] = ur + vr;
+          im[i + k] = ui + vi;
+          re[i + k + len / 2] = ur - vr;
+          im[i + k + len / 2] = ui - vi;
+          const t = cr * wr - ci * wi;
+          ci = cr * wi + ci * wr;
+          cr = t;
+        }
+      }
+    }
+    const edges = [0, 150, 500, 1500, 4000, 24000];
+    const bands = new Array(edges.length - 1).fill(0);
+    let total = 1e-30,
+      moment = 0;
+    for (let i = 0; i <= n / 2; i++) {
+      const f = (i * SR) / n,
+        p = re[i] * re[i] + im[i] * im[i];
+      total += p;
+      moment += f * p;
+      for (let b = 0; b < bands.length; b++) if (f >= edges[b] && f < edges[b + 1]) bands[b] += p;
+    }
+    return { centroid: moment / total, bands: bands.map((p) => (100 * p) / total) };
+  }
+
+  function measure(scene, r) {
+    const channels = [r.buffer.getChannelData(0), r.buffer.getChannelData(1)];
+    const k = channels.map(kweight);
+    const kp = channels.map((c) => kweight(phone(c)));
+    const out = { name: scene.name, kind: scene.kind, startMs: +r.startMs.toFixed(1), baseNodes: r.baseNodes, shotNodes: r.shotNodes, bubbleNodes: r.bubbleNodes };
+    let peak = 0;
+    for (const c of channels) for (let i = 0; i < c.length; i++) peak = Math.max(peak, Math.abs(c[i]));
+    out.peak = +(20 * Math.log10(peak + 1e-20)).toFixed(1);
+    const r1 = (v) => +v.toFixed(1);
+    if (scene.kind === "bed") {
+      out.full = r1(loud(k, 3, 8));
+      out.phone = r1(loud(kp, 3, 8));
+      Object.assign(out, spectrum(channels, 3, 8));
+    } else if (scene.kind === "silent") {
+      out.full = r1(loud(k, 3, 8));
+    } else if (scene.kind === "cross") {
+      // Momentary loudness (400 ms) under water before, in the air, and after.
+      for (const [name, ks] of [
+        ["", k],
+        ["Phone", kp],
+      ]) {
+        const under = mean(series(ks, 2, 4, 0.4));
+        out["under" + name] = r1(under);
+        out["above" + name] = r1(mean(series(ks, scene.name === "leap_whole" ? 4.3 : 4.6, scene.name === "leap_whole" ? 5 : 6, 0.4)));
+        out["jump" + name] = r1(loudest(ks, 3.8, 7.4, 0.4) - under);
+        out["jump100" + name] = r1(loudest(ks, 3.8, 7.4, 0.1) - loudest(ks, 2, 4, 0.1));
+      }
+    } else if (scene.kind === "shot") {
+      out.bedFull = r1(loud(k, 2.5, 4));
+      out.dFull = r1(loudest(k, 4, 7, 0.05) - loudest(k, 2.5, 4, 0.05));
+      out.dPhone = r1(loudest(kp, 4, 7, 0.05) - loudest(kp, 2.5, 4, 0.05));
+      out.d400 = r1(loudest(k, 4, 7, 0.4) - loudest(k, 2.5, 4, 0.4));
+      out.centroid = Math.round(spectrum(channels, 4, 5.5).centroid);
+    } else {
+      out.full = r1(loudest(k, 1, 7.5, 0.4));
+      Object.assign(out, spectrum(channels, 1, 7.5));
+    }
+    if (out.centroid) out.centroid = Math.round(out.centroid);
+    if (out.bands) out.bands = out.bands.map(r1);
+    return out;
+  }
+
+  function wav(buffer) {
+    const n = buffer.length,
+      ch = buffer.numberOfChannels;
+    const view = new DataView(new ArrayBuffer(44 + n * ch * 2));
+    const text = (o, s) => [...s].forEach((c, i) => view.setUint8(o + i, c.charCodeAt(0)));
+    text(0, "RIFF");
+    view.setUint32(4, 36 + n * ch * 2, true);
+    text(8, "WAVEfmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, ch, true);
+    view.setUint32(24, SR, true);
+    view.setUint32(28, SR * ch * 2, true);
+    view.setUint16(32, ch * 2, true);
+    view.setUint16(34, 16, true);
+    text(36, "data");
+    view.setUint32(40, n * ch * 2, true);
+    const data = [...Array(ch)].map((_, c) => buffer.getChannelData(c));
+    for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++) view.setInt16(44 + (i * ch + c) * 2, Math.max(-1, Math.min(1, data[c][i])) * 32767, true);
+    let s = "";
+    const bytes = new Uint8Array(view.buffer);
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+
+  window.scenes = () => SCENES.map((s) => s.name);
+  window.runScene = async (name, withWav = false) => {
+    const scene = SCENES.find((s) => s.name === name);
+    const r = await render(scene);
+    const out = measure(scene, r);
+    if (withWav) out.wav = wav(r.buffer);
+    return out;
+  };
+  window.runAll = async () => {
+    const out = [];
+    for (const s of SCENES) out.push(await window.runScene(s.name));
+    return out;
+  };
+  window.ready = true;
+</script>

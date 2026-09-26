@@ -314,6 +314,9 @@ async function start() {
   const lore = createLore({ hud });
   const loreRegions = {};
   const sound = createSound();
+  // What the sound is told each frame (one object, filled in afresh, not a new one each time).
+  const soundState = { rain: 0, daylight: 1, stir: 0, roar: 0, sea: 0, submerged: 1, depth: 1 };
+  const soundRegions = {};
   mark("hud");
   // Badges for everything found and done the first time; the logbook keeps the collection.
   const badges = createBadges({ sound });
@@ -397,7 +400,7 @@ async function start() {
       document.exitPointerLock?.();
       held.clear();
     } else last = performance.now();
-    sound.hush(open || userPaused);
+    sound.hush(open || userPaused, "pause");
   }
   // Pause: P, or leaving the game -- Esc out of fullscreen or out of the captured pointer,
   // another window in front. The title card comes back (the fish saved first), over the
@@ -415,7 +418,7 @@ async function start() {
       intro.resume();
       closeQuality();
     }
-    sound.hush(value || logbook.open);
+    sound.hush(value || logbook.open, "pause");
     held.clear();
     if (!value) last = performance.now();
   }
@@ -605,6 +608,9 @@ async function start() {
     held.add(event.code);
     hud.touched();
   });
+  // Sound may start only from a gesture, and on iOS only from the end of a touch or from a
+  // click (a pointerdown does not count there): it is tried on each.
+  for (const type of ["pointerup", "click", "touchend"]) window.addEventListener(type, () => sound.start(), { capture: true, passive: true });
   window.addEventListener("keyup", (event) => {
     held.delete(event.code);
     if (event.code === "Space") releaseCharge();
@@ -735,7 +741,7 @@ async function start() {
     drive.start(fish, life.school.count);
     life.hunters.drive(fish, true);
     driveBar.hidden = false;
-    sound.splash(0.9);
+    sound.splash(0.9, 3.5);
     track("drive", { outcome: "start", school: drive.size });
     hud.toast("Treibjagd!", mode.vegan ? "Gänsesäger jagen den Schwarm." : "Gänsesäger jagen den Schwarm. Bleib mittendrin – bis zur Stromschnelle!", 6);
     if (mode.vegan) hud.tip("driveVegan", "<b>Die Treibjagd.</b> Gänsesäger jagen im Trupp: Unter Wasser kreisen sie um den Schwarm und holen sich einzelne Smolts. Dich lassen sie in Ruhe – zieh mit den anderen bis zur Stromschnelle.", 12);
@@ -794,7 +800,7 @@ async function start() {
         const near = clamp(1 - Math.hypot(e.x - fish.position.x, e.z - fish.position.z) / 90, 0.12, 0.9);
         ripples.add(e.x, e.z, 2.4);
         falls.splash(e.x, e.y, e.z, 5);
-        sound.splash(near);
+        sound.splash(near, 6);
       } else if (e.type === "seal") hud.toast("Eine Robbe!", mode.vegan ? "Sie frisst mit." : "Sie frisst mit – und hätte auch dich gern.", 5);
     }
     if (baitball.on && !ballShown) {
@@ -942,7 +948,7 @@ async function start() {
     const st = redd.state;
     if (happened.driven) {
       shake = Math.max(shake, 0.6);
-      sound.thump();
+      sound.thump("body");
       hud.note("Vertrieben!");
     }
     if (st.rival && rivalSaid !== st.rival) {
@@ -1613,7 +1619,7 @@ async function start() {
     shake = Math.max(shake, hit.where === "rear" ? 0.55 : 0.35);
     sound.nip();
     lastCombat = time;
-    if (hit.where === "rear" || hit.winded) sound.thump();
+    if (hit.where === "rear" || hit.winded) sound.thump("body");
     hud.tip("brawl", "<b>Jeder Fisch lässt sich angreifen.</b> Wer schwächer ist als du, flieht. Wer dir ebenbürtig oder stärker ist, wehrt sich und beißt zurück, und das kostet dich Kraft. Geht sie dir im Kampf ganz aus, stirbst du. Und wer groß genug ist, schluckt dich einfach.", 12);
     if (hit.minor || (hit.fled && !hit.beaten)) {
       // A shoal fish, a smolt, a hunter that thinks better of it.
@@ -1659,7 +1665,7 @@ async function start() {
       fish.energy = Math.max(0, fish.energy - struck.strength);
       fish.relative.add(struck.push);
       shake = Math.max(shake, 0.7);
-      sound.thump();
+      sound.thump("wood");
       hud.note(`Vom ${struck.title} getroffen!`);
       hud.tip("wheel", "<b>Das Mühlrad!</b> Seine Schaufeln tauchen tief in den Graben. Schwimm am Grund darunter durch – oder nimm den Fluss.", 9);
     }
@@ -1755,7 +1761,7 @@ async function start() {
       const net = nets.update(dt, fish, mode.vegan);
       if (net === "caught") {
         shake = 1;
-        sound.thump();
+        sound.thump("net");
         hud.note("Im Netz!");
         hud.tip("net", "<b>Im Stellnetz!</b> Die Maschen halten dich an den Kiemen fest. Drück immer wieder <kbd>Leertaste</kbd>, um dich loszureißen – bevor dir die Kraft ausgeht. Unter den Netzen oder um ihre Enden herum ist das Wasser frei.", 12);
       } else if (net === "freed") {
@@ -1774,7 +1780,7 @@ async function start() {
           break;
         case "branch":
           shake = Math.max(shake, 0.8);
-          sound.thump();
+          sound.thump("wood");
           hud.note("Von einem Ast getroffen!");
           break;
         case "stormOver":
@@ -1789,7 +1795,7 @@ async function start() {
           break;
         case "hooked":
           shake = 1;
-          sound.thump();
+          sound.thump("hook");
           hud.note("Am Haken!");
           hud.tip("hooked", "<b>Am Haken!</b> Er holt dich ein. Schieß mit <kbd>Leertaste</kbd> immer wieder weg vom Ufer, bis der Haken ausreißt – bevor er dich an Land zieht.", 10);
           break;
@@ -1806,7 +1812,7 @@ async function start() {
           break;
         case "otterSplash":
           ripples.add(e.x, e.z, 1.4);
-          sound.splash(0.35);
+          sound.splash(0.35, 4);
           break;
         case "floes":
           hud.tip("floes", "<b>Eisgang!</b> Das Eis bricht auf, Schollen treiben flussab. Unter ihnen kommst du nicht an die Luft.", 9);
@@ -1861,13 +1867,18 @@ async function start() {
       } else if (e.type === "splash") {
         ripples.add(e.x, e.z, e.strength);
         falls.splash(e.x, e.y, e.z, e.strength * L);
-        sound.splash(e.strength);
+        // Back in from the air: the splash of its size, and the water closing over it.
+        sound.splash(e.strength, L);
+        sound.dive(L);
       } else if (e.type === "tumble") {
         falls.splash(e.x, e.y - 0.3, e.z, e.strength * L);
-        sound.splash(e.strength * 0.5);
+        sound.splash(e.strength * 0.5, L);
+      } else if (e.type === "overFall") {
+        // Thrown out into the air with the water over a fall.
+        sound.leap(L * 0.7);
       } else if (e.type === "leap") {
         brood.leapt();
-        sound.leap();
+        sound.leap(L);
         falls.splash(fish.position.x, level(fish.river.s), fish.position.z, L);
         ripples.add(fish.position.x, fish.position.z, 1.2);
       } else if (e.type === "leapDone") {
@@ -1881,14 +1892,16 @@ async function start() {
       } else if (e.type === "knock") {
         fish.energy = Math.max(0, fish.energy - e.strength);
         shake = 0.8;
-        sound.thump();
+        // Came down on the stones.
+        sound.thump("rock", e.strength > 0.04 ? 1.2 : 0.8);
       }
     }
     if (outcome.splash) {
       const sp = outcome.splash;
       ripples.add(sp.x, sp.z, sp.strength);
       falls.splash(sp.x, sp.y, sp.z, sp.strength * 2);
-      sound.splash(sp.strength);
+      // (A kingfisher's, a heron's bill, a bear's paw: the harder, the bigger.)
+      sound.splash(sp.strength, sp.size ?? sp.strength * 3);
     }
     if (outcome.call) sound.call(outcome.call);
     // The eye on the card: seen by a hunter, or hidden from one that is about.
@@ -1923,7 +1936,7 @@ async function start() {
     // In a school, a hunter often takes another.
     if (outcome.decoy) {
       shake = Math.max(shake, 0.6);
-      sound.thump();
+      sound.thump("body", 0.7);
       if (baitball.on) hud.note("Knapp – er hat einen anderen erwischt!");
       else {
         hud.note("Ein Schwarmgefährte …");
@@ -1933,7 +1946,7 @@ async function start() {
     }
     // The drive: a goosander dived into the school and came out with one of the others.
     if (outcome.raided) {
-      sound.thump();
+      sound.thump("body", 0.6);
       if (!mode.vegan) hud.tip("raid", "Ein Gänsesäger hat sich einen Smolt aus dem Schwarm geholt. Mitten im Schwarm trifft es selten dich – am Rand und allein fast immer.", 9);
     }
     if ((outcome.school ?? 0) >= 6) feat("school");
@@ -1971,7 +1984,7 @@ async function start() {
         hud.toast("Revier erobert!", "Solange du hier bleibst, treibt dir mehr Futter zu.", 5);
       } else if (e.type === "lost") {
         shake = Math.max(shake, 0.5);
-        sound.thump();
+        sound.thump("body", 0.8);
         hud.note("Verdrängt!");
       } else if (e.type === "leftTerritory") {
         hud.note("Revier aufgegeben");
@@ -1984,7 +1997,7 @@ async function start() {
     }
     if (outcome.bitten) {
       shake = 1;
-      sound.thump();
+      sound.thump("body", 1.3);
       lastCombat = time;
     }
     // Nips from a fish that fights back.
@@ -2013,7 +2026,7 @@ async function start() {
       if (!veiled && DEATH - dead > (held.active ? 1.9 : 0)) {
         veiled = true;
         hud.veil("dark");
-        sound.hush(true);
+        sound.hush(true, "dead");
       }
       if (dead <= 0 && !lifecard.open) handover();
     }
@@ -2206,7 +2219,7 @@ async function start() {
     fish.safe = true;
     dead = 0;
     hud.veil(null);
-    sound.hush(false);
+    sound.hush(false, "dead");
     hud.toast("", broodWord("takeover"), 4);
     persist();
   }
@@ -2276,7 +2289,7 @@ async function start() {
     nets.reset();
     pebbles.prime(fish.position, fish.length, fish.river.s);
     hud.veil(null);
-    sound.hush(false);
+    sound.hush(false, "dead");
     showBrood();
     persist();
   }
@@ -2295,7 +2308,7 @@ async function start() {
     nets.reset();
     pebbles.prime(fish.position, fish.length, fish.river.s);
     hud.veil(null);
-    sound.hush(false);
+    sound.hush(false, "dead");
     persist();
   }
   // Spawning: the fish settles over the gravel of the redd, and the eggs go down among the
@@ -2326,7 +2339,7 @@ async function start() {
     // What this life was good at goes on to the brood (heritage.js).
     spawning = { t: 0, laid: 0, traits: earned(brood.life) };
     if (redd.on) redd.spawn(fish);
-    sound.hush(false);
+    sound.hush(false, "dead");
   }
   function stepSpawning(dt) {
     if (!spawning) return;
@@ -2491,15 +2504,15 @@ async function start() {
     for (const material of mirrored) material.envMapIntensity = 0.6 * (0.08 + 0.92 * sunUp);
     life.light(0.2 + 0.8 * sunUp, sunUp);
     falls.light(0.25 + 0.75 * sunUp);
-    sound.update(dt, {
-      rain,
-      daylight: sunUp,
-      stir: Math.max(0, fish.relative.length() - salmon.speeds().cruise) / Math.max(1, salmon.speeds().sprint),
-      roar: falls.roar(fish.position, fish.river.s),
-      sea: regionWeights(fish.river.s).sea,
-      above,
-      depth,
-    });
+    soundState.rain = rain;
+    soundState.daylight = sunUp;
+    soundState.stir = Math.max(0, fish.relative.length() - salmon.speeds().cruise) / Math.max(1, salmon.speeds().sprint);
+    soundState.roar = falls.roar(fish.position, fish.river.s);
+    soundState.sea = regionWeights(fish.river.s, soundRegions).sea;
+    // (The sound eases this over the moment of crossing.)
+    soundState.submerged = above ? 0 : 1;
+    soundState.depth = depth;
+    sound.update(dt, soundState);
     updateWaterLevel();
     // The surface's ripples (and the caustic net they make) slide downstream; at sea, barely.
     driftSurface(dt * (1 - 0.8 * regionWeights(cameraRiver.s).sea), at.tx, at.tz);
@@ -2721,7 +2734,7 @@ async function start() {
   let running = true;
   document.addEventListener("visibilitychange", () => {
     running = !document.hidden;
-    sound.hush(!running);
+    sound.hush(!running, "hidden");
     last = performance.now();
     if (!running) persist();
     if (running) requestAnimationFrame(tick);
@@ -2795,6 +2808,7 @@ async function start() {
       world,
       badges,
       logbook,
+      sound,
       step,
       draw,
       advance,
