@@ -146,26 +146,48 @@ export function makeGrunt() {
   return [fadeOut(l), fadeOut(r)];
 }
 
+// The chord under the home brook's gurgle, A3 E4 A4, looked up by the phase of A3 (two turns
+// of A3 are three of E4 and four of A4).
+const CHORD = (() => {
+  const size = 1 << 14,
+    table = new Float32Array(size);
+  for (let i = 0; i < size; i++) {
+    const x = (2 * i) / size;
+    table[i] = 0.5 * Math.sin(2 * Math.PI * x) + 0.35 * Math.sin(2 * Math.PI * 1.5 * x) + 0.25 * Math.sin(2 * Math.PI * 2 * x);
+  }
+  return (turns) => table[Math.floor(((turns / 2) % 1) * size)];
+})();
 // The scent of the home brook, for a spawner on its way back: the brook's own bright
 // gurgling (600-1500 Hz) and under it a soft chord, A3 E4 A4, the top note beating slowly.
 // 4 s, looped (every tone a whole number of turns in it).
 export function makeHome() {
-  return looped(4, 2, (l, r) => {
-    for (const [d, seed] of [
-      [l, 0],
-      [r, 1.7],
-    ]) {
-      const bands = [700, 1000, 1400].map((f) => biquad("bandpass", f * random(0.95, 1.05), 3));
+  // (One channel: a drone needs no more, and it is made in half the time.)
+  return looped(4, 1, (d) => {
+    for (const seed of [0]) {
+      const [b0, b1, b2] = [700, 1000, 1400].map((f) => biquad("bandpass", f * random(0.95, 1.05), 3));
+      let s0 = 0,
+        s1 = 0,
+        s2 = 0;
+      // (And A4 once more, half a hertz higher, beating slowly against the chord's: a sine
+      // run by a resonator that never dies away.)
+      const w = (2 * Math.PI * 440.5) / RATE,
+        c = 2 * Math.cos(w);
+      let y1 = Math.sin(w),
+        y2 = 0;
       for (let i = 0; i < d.length; i++) {
         const t = i / RATE;
-        let v = 0;
-        bands.forEach((b, k) => {
-          // (Each band swelling and falling at its own pace, as eddies do.)
-          const swell = Math.pow(0.5 + 0.5 * Math.sin(2 * Math.PI * (0.5 + 0.25 * k) * t + seed + 2 * k), 3);
-          v += swell * b.run(white());
-        });
-        const drone = 0.5 * Math.sin(2 * Math.PI * 220 * t) + 0.35 * Math.sin(2 * Math.PI * 329.5 * t + seed) + 0.25 * (Math.sin(2 * Math.PI * 440 * t) + Math.sin(2 * Math.PI * 440.5 * t));
-        d[i] = 0.12 * v + 0.06 * drone;
+        // (Each band swelling and falling at its own pace, as eddies do; worked out every
+        // 32 samples, which is plenty for so slow a swell.)
+        if ((i & 31) === 0) {
+          s0 = Math.pow(0.5 + 0.5 * Math.sin(2 * Math.PI * 0.5 * t + seed), 3);
+          s1 = Math.pow(0.5 + 0.5 * Math.sin(2 * Math.PI * 0.75 * t + seed + 2), 3);
+          s2 = Math.pow(0.5 + 0.5 * Math.sin(2 * Math.PI * t + seed + 4), 3);
+        }
+        const v = s0 * b0.run(white()) + s1 * b1.run(white()) + s2 * b2.run(white());
+        d[i] = 0.12 * v + 0.06 * (CHORD((220 * i) / RATE) + 0.25 * y1);
+        const y = c * y1 - y2;
+        y2 = y1;
+        y1 = y;
       }
     }
   });
