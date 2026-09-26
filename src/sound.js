@@ -57,12 +57,12 @@ const MIX = {
   wash: 0.5,
   washMid: 1.15,
   gurgle: 0.8,
-  gravel: 0.15,
+  gravel: 0.25,
   rain: 0.4,
   rainUnder: 0.6,
   pings: 0.28,
-  clatter: 1.3,
-  chirp: 0.25,
+  clatter: 1.1,
+  chirp: 0.35,
   air: 0.5,
   whiteWater: 0.5,
   bubble: 0.6,
@@ -88,7 +88,7 @@ const MIX = {
   charge: 1.0,
   tick: 0.6,
   cleared: 0.1,
-  swell: 0.5,
+  swell: 0.6,
   pulse: 0.3,
   coil: 0.4,
   snap: 0.8,
@@ -101,7 +101,7 @@ const MIX = {
   hatch: 0.35,
   pad: 0.05,
   ending: 0.6,
-  storm: 0.5,
+  storm: 0.8,
   home: 0.5,
   slap: 0.5,
   creak: 0.25,
@@ -1013,7 +1013,7 @@ export function createSound() {
       if (Math.abs(v - chargeWritten) > 0.03) {
         chargeWritten = v;
         chargeTone.frequency.setTargetAtTime(260 + 640 * v, now, 0.02);
-        chargeLevel.gain.setTargetAtTime(MIX.charge * (0.08 + 0.08 * v), now, 0.03);
+        chargeLevel.gain.setTargetAtTime(MIX.charge * (0.1 + 0.08 * v), now, 0.03);
       }
       if (v > SWEET && chargeAt <= SWEET) play(pick(bank("tick")), nodes.body, MIX.tick);
       chargeAt = v;
@@ -1058,7 +1058,7 @@ export function createSound() {
       const river = 1 - seaW;
       const flowK = Math.min(1.5, Math.max(0, flow / 5));
       // A spate roars like white water, and rain and the air are shut out under ice.
-      roar = Math.max(roar, 0.45 * flood);
+      roar = Math.max(roar, 0.4 * flood);
       const open = 1 - Math.min(1, ice);
       if (clock > nextBubble) {
         // (Sparser at sea, and lower: bigger bubbles, from further off.)
