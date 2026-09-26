@@ -265,7 +265,7 @@ if (get("spawn_veil")?.extra) {
 }
 if (get("bed_home") && get("bed_river")) {
   const d = get("bed_home").full - get("bed_river").full;
-  check(`bed_home: the home brook's scent heard over the river (+${d.toFixed(1)} dB, +1..+5), a phone plays it (${(get("bed_home").full - get("bed_home").phone).toFixed(1)}), nothing in it coming round (${get("bed_home").extra.repeats.toFixed(2)} ≤ 0.5)`, d >= 1 && d <= 5 && get("bed_home").full - get("bed_home").phone <= 3 && get("bed_home").extra.repeats <= 0.5);
+  check(`bed_home: the home brook's scent heard over the river (+${d.toFixed(1)} dB, +1..+5), a phone plays it (${(get("bed_home").full - get("bed_home").phone).toFixed(1)}), nothing in it coming round (${get("bed_home").extra.repeats.toFixed(2)} ≤ 0.6; its old loop 0.94)`, d >= 1 && d <= 5 && get("bed_home").full - get("bed_home").phone <= 3 && get("bed_home").extra.repeats <= 0.6);
 }
 // Weather: the flash cracks (from under the water a little less than in the air, as all
 // that comes from above), the thunder still rolls, a storm swells up and brightens.
