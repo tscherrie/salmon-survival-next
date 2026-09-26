@@ -106,6 +106,7 @@ const MIX = {
   counter: 0.6,
   ship: 0.35,
   grunt: 0.7,
+  gulp: 0.8,
   crack: 0.7,
 };
 // The leap's sweet spot (main.js: a leap released above this on the swing clears the fall).
@@ -443,7 +444,7 @@ export function createSound() {
       // Moved only when the ear crosses the surface, at the pace of the crossing.
       crossing: { pingsUnder: pingsUnder.gain, waterDuck: waterDuck.gain, dry: dry.gain, wet: wet.gain, airOpen: airOpen.gain, surface: surface.gain, air: air.gain },
     };
-    for (const name of ["gravel", "clatter", "chirp", "bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear", "fanfare", "chime-bronze", "chime-silver", "chime-gold", "victory", "growth", "hatch", "crack", "slap", "creak", "plops", "counter", "grunt"]) bank(name);
+    for (const name of ["gravel", "clatter", "chirp", "bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear", "fanfare", "chime-bronze", "chime-silver", "chime-gold", "victory", "growth", "hatch", "crack", "slap", "creak", "plops", "counter", "grunt", "gulp", "otter"]) bank(name);
     bank("white");
     bank("brown");
     return true;
@@ -664,32 +665,13 @@ export function createSound() {
       if (!ready()) return;
       const at = context.currentTime + 0.02;
       if (kind === "fish") {
-        const source = bufferSource(bank("white")[0]);
-        const low = filter("lowpass", 520, 0.7);
-        const env = amp(0);
-        env.gain.setValueAtTime(0, at);
-        env.gain.linearRampToValueAtTime(0.7, at + 0.12);
-        env.gain.exponentialRampToValueAtTime(0.0005, at + 0.5);
-        source.connect(low).connect(env).connect(nodes.water);
-        source.start(at, Math.random() * 2);
-        source.stop(at + 0.55);
-        voice(source, env);
-        const osc = oscillator();
-        const gulp = amp(0);
-        osc.frequency.setValueAtTime(170, at + 0.2);
-        osc.frequency.exponentialRampToValueAtTime(46, at + 0.7);
-        gulp.gain.setValueAtTime(0, at + 0.2);
-        gulp.gain.linearRampToValueAtTime(1.0, at + 0.24);
-        gulp.gain.exponentialRampToValueAtTime(0.0005, at + 0.85);
-        osc.connect(gulp).connect(nodes.water);
-        osc.start(at + 0.19);
-        osc.stop(at + 0.9);
-        voice(osc, gulp);
+        play(pick(bank("gulp")), nodes.water, MIX.gulp, at, random(0.95, 1.05));
         // (Its jaws shutting on it: heard on a phone too.)
         play(pick(bank("jaws")), nodes.water, MIX.snap * 1.2, at + 0.62, random(0.55, 0.62));
         bubbles(8, 0.6, 0.6, 0.7, at + 0.3);
       } else {
-        click(at, 0.55, 2600, 0.025, nodes.surface);
+        // (The bill's clack: the jaws' snap, higher.)
+        play(pick(bank("jaws")), nodes.surface, MIX.snap, at, random(1.05, 1.15));
         play(variant(`splash:${step(3)}`, () => makeSplash(stepSize(step(3)))), nodes.surface, MIX.splash * 0.9, at);
         bubbles(10, 0.4, 0.8, 0.8, at + 0.05);
       }
@@ -882,24 +864,7 @@ export function createSound() {
     // Otters at play: quick, high chirps and squeaks.
     otter() {
       if (!ready()) return;
-      const at = context.currentTime + 0.02;
-      const n = 2 + Math.floor(Math.random() * 4);
-      for (let k = 0; k < n; k++) {
-        const osc = oscillator();
-        const env = amp(0);
-        const t0 = at + k * (0.09 + Math.random() * 0.08);
-        const f = 1800 + Math.random() * 1400;
-        osc.type = "triangle";
-        osc.frequency.setValueAtTime(f, t0);
-        osc.frequency.exponentialRampToValueAtTime(f * (0.55 + Math.random() * 0.3), t0 + 0.07);
-        env.gain.setValueAtTime(0, t0);
-        env.gain.linearRampToValueAtTime(MIX.otter * (1 + 4 * submerged), t0 + 0.008);
-        env.gain.exponentialRampToValueAtTime(0.0005, t0 + 0.09);
-        osc.connect(env).connect(nodes.air);
-        osc.start(t0);
-        osc.stop(t0 + 0.11);
-        voice(osc, env);
-      }
+      play(pick(bank("otter")), nodes.air, MIX.otter * (1 + 4 * submerged), undefined, random(0.95, 1.05));
     },
     // A fishing line: the reel's ratchet ticking as it is pulled in, or the line snapping.
     reel() {

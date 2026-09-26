@@ -80,6 +80,46 @@ export function makeCleared() {
   return [fadeOut(d, 0.1)];
 }
 
+// Swallowed by a fish: the water rushing into its mouth (noise under 520 Hz, swelling for
+// a tenth of a second), then a deep gulp falling from 170 to 46 Hz.
+export function makeGulp() {
+  const d = mono(0.95);
+  const low = biquad("lowpass", 520, 0.7);
+  for (let i = 0; i < 0.55 * RATE; i++) {
+    const t = i / RATE;
+    d[i] += 0.35 * (t < 0.12 ? t / 0.12 : Math.exp(-(t - 0.12) / 0.06)) * low.run(white());
+  }
+  const start = Math.floor(0.2 * RATE);
+  let phase = 0;
+  for (let i = 0; start + i < d.length - 0.05 * RATE; i++) {
+    const t = i / RATE;
+    phase += (2 * Math.PI * 170 * Math.pow(46 / 170, Math.min(1, t / 0.5))) / RATE;
+    d[start + i] += (t < 0.04 ? t / 0.04 : Math.exp(-(t - 0.04) / 0.08)) * Math.sin(phase);
+  }
+  return [fadeOut(d)];
+}
+// Otters at play: two to five quick, high squeaks, each falling.
+export function makeOtter() {
+  const d = mono(0.9);
+  const n = 2 + Math.floor(Math.random() * 4);
+  let at = 0;
+  for (let k = 0; k < n; k++) {
+    const f = random(1800, 3200),
+      to = f * random(0.55, 0.85);
+    const start = Math.floor(at * RATE);
+    let phase = 0;
+    for (let i = 0; i < 0.09 * RATE; i++) {
+      const t = i / RATE;
+      phase += (f * Math.pow(to / f, Math.min(1, t / 0.07))) / RATE;
+      // (A triangle wave: its odd overtones.)
+      const tri = 1 - 4 * Math.abs(phase - Math.floor(phase) - 0.5);
+      d[start + i] += (t < 0.008 ? t / 0.008 : Math.exp(-(t - 0.008) / 0.012)) * tri;
+    }
+    at += random(0.09, 0.17);
+  }
+  return [fadeOut(d, 0.02)];
+}
+
 // ---- Hunters coming, and the fish's heart.
 
 // Noise in a band shaped by `envelope(t)` (0..1 over `seconds`), added at `at`.
@@ -370,6 +410,8 @@ export function* makeCues(raw) {
   raw.bear = many(2, makeBear);
   yield;
   raw.fanfare = many(1, makeFanfare);
+  raw.gulp = many(2, makeGulp);
+  raw.otter = many(3, makeOtter, false);
   yield;
   for (const tier of ["bronze", "silver", "gold"]) raw[`chime-${tier}`] = many(1, () => makeChime(tier));
   raw.victory = many(1, makeVictory);
