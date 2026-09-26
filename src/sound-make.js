@@ -83,6 +83,17 @@ export function tone(data, at, from, to, glide, tau, amp, attack = 0.002) {
     data[start + i] += amp * (t < attack ? t / attack : Math.exp(-(t - attack) / tau)) * Math.sin(phase);
   }
 }
+// A sound with nothing much above 6 kHz kept at half the rate (half the memory): each pair
+// of samples, smoothed with its neighbours, becomes one. Its channels carry the new `rate`.
+export function half(channels) {
+  const out = channels.map((d) => {
+    const h = new Float32Array(d.length >> 1);
+    for (let i = 0; i < h.length; i++) h[i] = 0.25 * (d[2 * i - 1] ?? 0) + 0.5 * d[2 * i] + 0.25 * d[2 * i + 1];
+    return h;
+  });
+  out.rate = RATE / 2;
+  return out;
+}
 // The last `seconds` of a sound faded out, so that nothing stops on a click.
 export function fadeOut(data, seconds = 0.03) {
   const n = Math.min(data.length, Math.floor(seconds * RATE));

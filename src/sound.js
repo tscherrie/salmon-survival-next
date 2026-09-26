@@ -80,9 +80,28 @@ const MIX = {
   charge: 1.0,
   tick: 0.6,
   cleared: 0.1,
+  swell: 0.5,
+  pulse: 0.3,
+  coil: 0.4,
+  snap: 0.8,
+  moan: 0.25,
+  heart: 0.5,
 };
 // The leap's sweet spot (main.js: a leap released above this on the swing clears the fall).
 const SWEET = 0.82;
+// The hunters' voices: the sample, the group it sounds in, how loud, and how much louder
+// under water -- by about what the surface takes from it at its pitch, so that a warning is
+// still heard (a kingfisher's whistle loses most, a bear's huff hardly anything). Fish and
+// the otter under water have none: the swell of pressure is their voice.
+const CALLS = {
+  kingfisher: { bank: "kingfisher", bus: "air", loud: 0.4, under: 7.5 },
+  heron: { bank: "heron", bus: "air", loud: 0.55, under: 2.5 },
+  merganser: { bank: "merganser", bus: "air", loud: 0.8, under: 2 },
+  drive: { bank: "merganser", bus: "air", loud: 0.8, under: 2 },
+  seal: { bank: "sealWhoosh", bus: "water", loud: 0.8, under: 0 },
+  bear: { bank: "bear", bus: "air", loud: 0.8, under: 1 },
+};
+const BIRDS = ["kingfisher", "heron", "merganser", "drive"];
 
 export function createSound() {
   let enabled = true;
@@ -104,6 +123,14 @@ export function createSound() {
     submerged = 1,
     crossing = NaN,
     clearTone = 7000,
+    // The heart: beating until then (by the frame clock), how fast, when the next beat is.
+    heartUntil = -1,
+    bpm = 64,
+    nextBeat = 0,
+    beating = false,
+    // A strike about to come, as the warnings last had it; the warnings' round (see warn()).
+    warnDanger = false,
+    warnRound = 0,
     // The leap's charge: its tone while the meter swings, and where the swing last was.
     chargeTone = null,
     chargeLevel = null,
@@ -119,6 +146,10 @@ export function createSound() {
   // so that one ending does not end the others.
   const hushes = new Set();
   // The world round the fish as update() was last told it (one object, kept).
+  // What the ear knows of each hunter (by the game's own object for it), and the ones heard
+  // in the last round of warnings.
+  const heard = new WeakMap();
+  const tracked = [];
   const here = { brook: 0, upper: 0, middle: 1, lower: 0, estuary: 0, sea: 0, flow: 1, depthRel: 0.5, ice: 0, flood: 0, energy: 1, breath: 1, winded: false, danger: 0, home: 0, mill: 0 };
   const raw = {};
   const banks = {};
@@ -127,8 +158,8 @@ export function createSound() {
   workshop.add(makeAll(raw));
   workshop.add(makeCues(raw));
 
-  // (`rate` lower for the deep sounds, which need no more: half the memory at 24 kHz.)
-  const toBuffer = (channels, rate = RATE) => {
+  // (At half the rate for what has nothing much high in it: see half() in sound-make.js.)
+  const toBuffer = (channels, rate = channels.rate ?? RATE) => {
     const buffer = context.createBuffer(channels.length, channels[0].length, rate);
     channels.forEach((data, c) => buffer.getChannelData(c).set(data));
     bytes += channels.length * channels[0].length * 4;
@@ -351,11 +382,12 @@ export function createSound() {
         rainUnder: knob(rainUnderGain.gain),
         waterTone: knob(waterTone.frequency, 0.015, 1),
         gills: knob(gillsGain.gain),
+        ambience: knob(ambience.gain),
       },
       // Moved only when the ear crosses the surface, at the pace of the crossing.
       crossing: { waterDuck: waterDuck.gain, dry: dry.gain, wet: wet.gain, airOpen: airOpen.gain, surface: surface.gain, air: air.gain },
     };
-    for (const name of ["bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared"]) bank(name);
+    for (const name of ["bubble", ...KNOCKS, "nip", "breach", "rise", "reel", "whump", "jaws", "denied", "thud", "gasp", "tick", "cleared", "swell", "pulse", "coil", "heart", "kingfisher", "heron", "merganser", "sealWhoosh", "sealMoan", "bear"]) bank(name);
     bank("white");
     bank("brown");
     return true;
@@ -491,6 +523,22 @@ export function createSound() {
   // from above only its low murmur.
   const waterTone = () => Math.exp(Math.log(700) + (Math.log(clearTone) - Math.log(700)) * crossing);
 
+  function sayCall(kind, pan) {
+    const c = CALLS[kind];
+    if (!c) return;
+    play(pick(bank(c.bank)), nodes[c.bus], c.loud * (1 + c.under * submerged), undefined, random(0.95, 1.05), pan);
+    // A seal now and then moans as well, far off through the water.
+    if (kind === "seal" && Math.random() < 0.35 && coolOk("moan", 40)) play(bank("sealMoan")[0], nodes.water, MIX.moan, context.currentTime + random(0.8, 1.6), random(0.9, 1.1), -0.5 * pan);
+  }
+  // A strike that missed: the jaws (a bill, a paw) shutting on nothing, where the hunter is.
+  function missed(h) {
+    const bird = BIRDS.includes(h.kind);
+    if (h.kind === "bear") play(pick(bank("body")), nodes.surface, MIX.knock * 0.8, undefined, random(0.8, 0.9), h.pan);
+    else play(pick(bank("jaws")), nodes.water, MIX.snap, undefined, bird ? random(1.1, 1.2) : random(0.55, 0.65), h.pan);
+    // (And a heron croaks at it.)
+    if (h.kind === "heron" && coolOk("heron", 5)) sayCall("heron", h.pan);
+  }
+
   return {
     get enabled() {
       return enabled;
@@ -569,7 +617,8 @@ export function createSound() {
         osc.start(at + 0.19);
         osc.stop(at + 0.9);
         voice(osc, gulp);
-        for (let k = 0; k < 3; k++) click(at + 0.62 + k * 0.09, 0.5 - k * 0.12, 800, 0.05, nodes.water);
+        // (Its jaws shutting on it: heard on a phone too.)
+        play(pick(bank("jaws")), nodes.water, MIX.snap * 1.2, at + 0.62, random(0.55, 0.62));
         bubbles(8, 0.6, 0.6, 0.7, at + 0.3);
       } else {
         click(at, 0.55, 2600, 0.025, nodes.surface);
@@ -605,28 +654,12 @@ export function createSound() {
       const k = step(size);
       play(variant(`blup:${k}`, () => makeBlup(stepSize(k)), 2), nodes.world, MIX.blup, undefined, random(0.92, 1.08));
     },
-    // A call from above the water: the kingfisher's thin, piercing whistle.
-    call(kind = "kingfisher") {
+    // A hunter's call: "kingfisher" (its thin, piercing whistle), "heron" (a harsh croak),
+    // "merganser" (a rattling krrr), "seal" (a whoosh through the water, now and then a moan),
+    // "bear" (huffs and a growl); `pan` where it is, left (-1) to right (1).
+    call(kind = "kingfisher", pan = 0) {
       if (!ready()) return;
-      const at = context.currentTime + 0.02;
-      // (Under water it comes through the surface dulled, and it is a warning: played louder
-      // by about what the surface takes from it at its pitch, it is still heard.)
-      const loud = MIX.call * (1 + 7.5 * submerged);
-      for (let k = 0; k < 2; k++) {
-        const osc = oscillator();
-        const env = amp(0);
-        const t0 = at + k * 0.16;
-        osc.frequency.setValueAtTime(3600, t0);
-        osc.frequency.exponentialRampToValueAtTime(4300, t0 + 0.09);
-        env.gain.setValueAtTime(0, t0);
-        env.gain.linearRampToValueAtTime(loud, t0 + 0.01);
-        env.gain.exponentialRampToValueAtTime(0.0005, t0 + 0.12);
-        osc.connect(env).connect(nodes.air);
-        osc.start(t0);
-        osc.stop(t0 + 0.14);
-        voice(osc, env);
-      }
-      void kind;
+      sayCall(kind, pan);
     },
     // A new stage of life: a soft swell and a rising run of bell tones, bright and clear,
     // with a flurry of bubbles.
@@ -775,6 +808,69 @@ export function createSound() {
       if (!ready()) return;
       play(pick(bank("nip")), nodes.water, MIX.nip, undefined, random(0.92, 1.08));
     },
+    // The hunters after the fish, as the warning arrows have them (main.js warnings()): each
+    // { level, coiled, kind, key, pan, near } -- level 0.4 it has noticed the fish, 0.6 it
+    // stalks it, 0.8 it chases it, 1 it strikes (coiled: about to); `key` the hunter itself,
+    // `pan` where it is, left to right, `near` 0..1. Noticed: a swell of pressure from where it
+    // is (and a bird's, a seal's or the bear's call). The one nearest to striking pulses,
+    // faster the nearer; coiled, it ticks, faster and higher -- the cue to dodge. A strike
+    // that ends without a catch snaps shut on nothing. `alive` false while the fish is caught.
+    warn(list, alive = true) {
+      if (!context || !nodes) return;
+      warnRound++;
+      const on = ready();
+      const now = context.currentTime;
+      let danger = false;
+      for (let i = 0; i < list.length; i++) {
+        const th = list[i];
+        if (!th.key) continue;
+        let h = heard.get(th.key);
+        if (!h) heard.set(th.key, (h = { level: 0, coiled: false, round: 0, swellAt: -1e9, pulseAt: 0, callAt: -1e9, kind: "", pan: 0, tracked: false }));
+        // (Not in the last round: it went off, and has come back.)
+        const was = h.round === warnRound - 1 ? h.level : 0;
+        h.round = warnRound;
+        if (!h.tracked) {
+          h.tracked = true;
+          tracked.push(h);
+        }
+        h.kind = th.kind;
+        h.pan = i < 4 ? Math.max(-0.9, Math.min(0.9, th.pan ?? 0)) : 0;
+        const near = th.near ?? 0.5;
+        if (th.coiled || th.level >= 1) danger = true;
+        if (on) {
+          if (was < 0.4 && th.level >= 0.4) {
+            if (now - h.swellAt > 6 && coolOk("swell", 0.8)) {
+              h.swellAt = now;
+              play(pick(bank("swell")), nodes.water, MIX.swell * (0.25 + 0.35 * near), now + 0.01, random(0.92, 1.08), h.pan);
+            }
+            if (CALLS[th.kind] && th.kind !== "kingfisher" && now - h.callAt > 20) {
+              h.callAt = now;
+              sayCall(th.kind, h.pan);
+            }
+          }
+          if (th.coiled && !h.coiled) play(pick(bank("coil")), nodes.water, MIX.coil, now + 0.005, random(0.97, 1.03), h.pan);
+          if (i === 0 && th.level >= 0.6 && now >= h.pulseAt) {
+            const hunting = th.level >= 0.8;
+            h.pulseAt = now + (hunting ? 0.55 : 1.1) * (1 - 0.35 * near);
+            play(pick(bank("pulse")), nodes.water, MIX.pulse * (hunting ? 1 : 0.55) * (0.6 + 0.4 * near), now + 0.01, random(0.95, 1.05), h.pan);
+          }
+          if (was >= 1 && th.level < 1 && alive) missed(h);
+        }
+        h.level = th.level;
+        h.coiled = !!th.coiled;
+      }
+      // Gone from the list: off to recover after a strike that missed, or away.
+      for (let j = tracked.length - 1; j >= 0; j--) {
+        const h = tracked[j];
+        if (h.round === warnRound) continue;
+        if (h.level >= 1 && alive && on) missed(h);
+        h.level = 0;
+        h.coiled = h.tracked = false;
+        tracked[j] = tracked[tracked.length - 1];
+        tracked.pop();
+      }
+      warnDanger = danger;
+    },
     // A burst of speed (Space): the water shoved aside, a soft whump gliding down, and a trail
     // of bubbles behind (`trail` false when the burst is a leap: the breach says it).
     dash(size = 1, trail = true) {
@@ -894,9 +990,28 @@ export function createSound() {
         g.level.gain.setTargetAtTime(MIX.gurgle * (0.25 + Math.random() * 0.55) * (1 + stirred + roar) * (1 - 0.3 * night) * river, now, 0.2);
         g.level.gain.setTargetAtTime(MIX.gurgle * 0.05 * river, now + 0.5 + Math.random() * 0.6, 0.4);
       }
+      // The heart: when strength runs low, or a strike is about to come; on for ten seconds
+      // after, fading over the last four and slowing. It ducks the river under it a little.
+      const threat = danger > 0 || warnDanger;
+      const triggered = (energy < 0.25 || threat) && wanted();
+      if (triggered) heartUntil = clock + 10;
+      beating = clock < heartUntil;
+      if (beating) {
+        const target = !triggered ? 60 : threat ? 110 : 72;
+        bpm += (target - bpm) * (1 - Math.exp(-dt / (threat ? 0.6 : 2)));
+        if (clock >= nextBeat) {
+          nextBeat = clock + 60 / bpm;
+          if (wanted()) play(pick(bank("heart")), nodes.body, MIX.heart * Math.min(1, (heartUntil - clock) / 4) * random(0.9, 1), now + 0.02, random(0.98, 1.02));
+        }
+      } else {
+        bpm = 64;
+        nextBeat = clock;
+      }
       if (clock < nextSteer) return;
       nextSteer = clock + STEER;
       const k = nodes.knobs;
+      // (-6 dB at the bus comes out at about -3 through the compressor.)
+      steer(k.ambience, beating ? 0.5 : 1, now, 0.5);
       const swell = 0.8 + 0.2 * Math.sin(clock * 0.21) + 0.08 * Math.sin(clock * 0.53 + 1.3);
       const burble = 0.75 + 0.25 * Math.sin(clock * 0.37 + 2) * Math.sin(clock * 0.11);
       steer(k.rush, MIX.rush * (0.5 + 0.25 * stirred) * swell * (1 - 0.25 * night) * (0.45 + 0.55 * river), now, 0.4);

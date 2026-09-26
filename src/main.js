@@ -1606,6 +1606,9 @@ async function start() {
         y = -threatAt.y * h * 0.5;
       // Behind the camera the projection turns over.
       if (threatAt.z > 1) (x = -x), (y = -y);
+      // For the ear: where it is, left to right, and how near.
+      th.pan = clamp(x / (w * 0.5), -1, 1);
+      th.near = 1 - clamp(th.position.distanceTo(fish.position) / 45, 0, 1);
       const a = Math.atan2(y, x);
       const px = w * 0.5 + Math.cos(a) * w * 0.4,
         py = h * 0.5 + Math.sin(a) * h * 0.36;
@@ -1625,6 +1628,9 @@ async function start() {
       if (th.level >= 0.6)
         hud.tip("warn", "<b>Gefahr!</b> Die Pfeile am Bildrand zeigen, wo dich ein Jäger im Blick hat: gelb – er hat dich bemerkt, rot – er jagt dich. Pulsiert der Pfeil, stößt er gleich zu: jetzt zur Seite ausweichen!", 11);
     }
+    // And by ear: a swell where one notices the fish, pulses from the one hunting it, a
+    // quickening tick before a strike (the heart beats then as well).
+    sound.warn(list, dead <= 0 && !fish.captive);
   }
   let veiled = false;
   const lastPlace = fish.position.clone();
@@ -2565,7 +2571,8 @@ async function start() {
     soundState.depthRel = clamp((fishLevel - fish.position.y) / Math.max(0.1, fishLevel - bed(fish.river.s, fish.river.u)), 0, 1);
     soundState.ice = world.ice ?? 0;
     soundState.flood = Math.max(events.flood, 0.5 * conditions.flood) * (1 - soundState.sea);
-    soundState.energy = fish.energy;
+    // (The heart beats for strength running out -- not while the fish is safe or dead.)
+    soundState.energy = dead > 0 || fish.safe || celebration.active ? 1 : fish.energy;
     soundState.breath = fish.breath;
     soundState.winded = !!fish.winded && dead <= 0;
     sound.update(dt, soundState);

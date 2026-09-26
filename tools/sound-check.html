@@ -128,6 +128,23 @@
     events.push([29.4, (s) => s.charge?.(-1)]);
     return events;
   }
+  // The warnings as the game gives them, every frame: `state(t)` sets the hunters and
+  // returns the list (strongest first).
+  function warnings(from, to, state) {
+    const events = [];
+    for (let t = from; t < to; t += 1 / 30) events.push([t, (s) => s.warn?.(state(t))]);
+    return events;
+  }
+  function notice(name, pan) {
+    const h = hunter("pike");
+    return {
+      name,
+      kind: "shot",
+      params: {},
+      events: warnings(0.5, 7.8, (t) => (t < 4 ? [] : [Object.assign(h, { level: 0.4, pan, near: 0.6 })])),
+      measure: (m) => ({ pan: m.pan(4, 4.8, 2.5, 3.5) }),
+    };
+  }
   const SCENES = [
     { name: "bed_river", kind: "bed", params: {}, measure: (m) => ({ gills: m.band(3, 8, 500, 1500) }) },
     { name: "bed_river_night", kind: "bed", params: { daylight: 0 } },
@@ -201,6 +218,32 @@
       events: [...Array.from({ length: 54 }, (_, i) => [4 + i / 30, (s) => s.charge?.(0.5 - 0.5 * Math.cos(((i / 30) / 1.2) * Math.PI * 2))]), [5.8, (s) => s.charge?.(1, true)]],
       measure: (m) => ({ low: m.band(4.05, 4.2, 240, 420) - m.band(2.5, 4, 240, 420), high: m.band(4.5, 4.7, 700, 1000) - m.band(2.5, 4, 700, 1000), ticks: m.onsets(4, 6.2, 2800, 3800, 6) }),
     },
+    // Hunters: noticed on the left and on the right, hunting, about to strike, missing.
+    notice("warn_notice_left", -0.8),
+    notice("warn_notice_right", 0.8),
+    (() => {
+      const h = hunter("trout");
+      return { name: "warn_hunt", kind: "shot", params: {}, events: warnings(0.5, 7.9, (t) => (t < 4 ? [] : [Object.assign(h, { level: 0.8, near: 0.5 })])), measure: (m) => ({ pulses: m.onsets(4.7, 8, 200, 500, 5, 0.25) }) };
+    })(),
+    (() => {
+      const h = hunter("pike");
+      return { name: "warn_coiled", kind: "shot", params: {}, events: warnings(0.5, 7.9, (t) => (t < 4 ? [] : [Object.assign(h, { level: 1, coiled: t < 4.5, near: 0.8 })])), measure: (m) => ({ tick: m.band(4, 4.4, 1100, 2600) - m.band(2.5, 4, 1100, 2600) }) };
+    })(),
+    (() => {
+      // Hunting from 1 s, striking at 2.5, gone off to recover at 4 (it missed).
+      const h = hunter("pike");
+      return { name: "hunter_miss", kind: "shot", params: {}, events: warnings(0.5, 7.9, (t) => (t < 1 || t >= 4 ? [] : [Object.assign(h, { level: t < 2.5 ? 0.8 : 1, coiled: t >= 2.5 && t < 2.8 })])), measure: (m) => ({ snap: m.band(4, 4.15, 2000, 3000) - m.band(3.2, 3.9, 2000, 3000) }) };
+    })(),
+    // The heart: strength low from 4 to 6 s, then ten seconds more of it, fading.
+    {
+      name: "heartbeat",
+      kind: "shot",
+      seconds: 18,
+      params: (t) => ({ energy: t >= 4 && t < 6 ? 0.2 : 1 }),
+      measure: (m) => ({ duck: m.band(5, 9, 1500, 4000) - m.band(2, 4, 1500, 4000), knock: m.band(4, 8, 440, 620) - m.band(2, 4, 440, 620), after: m.band(16.6, 17.6, 440, 620) - m.band(2, 4, 440, 620) }),
+    },
+    // Their voices, heard from under the water.
+    ...["kingfisher", "heron", "merganser", "seal", "bear"].map((kind) => ({ ...shot(`call_${kind}`, (s) => s.call(kind)), measure: (m) => ({ mid: m.band(4, 5.5, 500, 1500) - m.band(2.5, 4, 500, 1500) }) })),
     { name: "bed_winded", kind: "bed", params: { winded: true, breath: 0.05 }, measure: (m) => ({ gills: m.band(3, 8, 500, 1500), pulse: m.period(3, 8, 500, 1500, 0.1, 0.2, 0.01) }) },
     shot("chime_gold", (s) => s.chime("gold")),
     solo("solo_splash_L0.3", (s) => s.splash(1, 0.3)),
@@ -211,6 +254,7 @@
     solo("solo_leap", (s) => s.leap(1)),
     solo("solo_dive_L1", (s) => s.dive?.(1)),
     solo("solo_dive_L5", (s) => s.dive?.(5)),
+    ...["kingfisher", "heron", "merganser", "seal", "bear"].map((kind) => solo(`solo_call_${kind}`, (s) => s.call(kind))),
   ];
 
   async function render(scene) {

@@ -39,6 +39,10 @@ const CHROME = process.env.CHROME || "/Applications/Google Chrome.app/Contents/M
 const profile = await mkdtemp(join(tmpdir(), "salmon-sound-"));
 const debugPort = 9400 + Math.floor(Math.random() * 400);
 const chrome = spawn(CHROME, ["--headless=new", `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`, "--no-first-run", "--autoplay-policy=no-user-gesture-required", "about:blank"], { stdio: "ignore" });
+// (Never left behind, however this ends.)
+process.on("exit", () => chrome.kill("SIGKILL"));
+process.on("SIGINT", () => process.exit(130));
+process.on("SIGTERM", () => process.exit(143));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let ws;
 for (let i = 0; i < 100 && !ws; i++) {
@@ -150,6 +154,30 @@ if (get("charge")?.extra) {
 if (get("bed_winded")?.extra && get("bed_river")?.extra) {
   const d = get("bed_winded").extra.gills - get("bed_river").extra.gills;
   check(`bed_winded: the gills +1..+3.5 dB at 500-1500 Hz over bed_river: ${d.toFixed(1)}`, d >= 1 && d <= 3.5);
+}
+// Hunters: placed left and right, heard on a phone; pulses while hunting; the tick before
+// a strike standing out; the heart heard, ducking the river, and gone after its ten seconds.
+for (const [name, sign] of [["warn_notice_left", 1], ["warn_notice_right", -1]])
+  if (get(name)?.extra) check(`${name}: placed (${get(name).extra.pan} dB left over right), ≥ +5 dB on a phone (${get(name).dPhone})`, sign * get(name).extra.pan >= 6 && get(name).dPhone >= 5);
+if (get("warn_hunt")?.extra) check(`warn_hunt: 5-9 pulses in 3.3 s: ${get("warn_hunt").extra.pulses}`, get("warn_hunt").extra.pulses >= 5 && get("warn_hunt").extra.pulses <= 9);
+if (get("warn_coiled")?.extra) check(`warn_coiled: ≥ +8 dB on a phone (${get("warn_coiled").dPhone}), its tick +8 dB at 1.1-2.6 kHz (${get("warn_coiled").extra.tick})`, get("warn_coiled").dPhone >= 8 && get("warn_coiled").extra.tick >= 8);
+if (get("hunter_miss")?.extra) check(`hunter_miss: the jaws snap shut on nothing (+${get("hunter_miss").extra.snap} dB at 2-3 kHz)`, get("hunter_miss").extra.snap >= 6);
+if (get("heartbeat")?.extra) {
+  const r = get("heartbeat");
+  check(`heartbeat: ≥ +4 dB on a phone (${r.dPhone}), the river ducked 1.5-4.5 dB at 1.5-4 kHz (${r.extra.duck}), gone 11 s after (${r.extra.after} dB)`, r.dPhone >= 4 && r.extra.duck <= -1.5 && r.extra.duck >= -4.5 && r.extra.after <= 1);
+}
+for (const r of ["kingfisher", "heron", "merganser", "seal", "bear"].map((k) => get(`call_${k}`)).filter(Boolean)) check(`${r.name} ≥ +5 dB over the bed on a phone, under water: ${r.dPhone}`, r.dPhone >= 5);
+const calls = ["kingfisher", "heron", "merganser", "seal", "bear"].map((k) => get(`solo_call_${k}`)).filter(Boolean);
+if (calls.length === 5) {
+  // Told apart: by brightness (20 % apart), or seal and bear by their 500-1500 Hz share.
+  const clash = [];
+  for (let i = 0; i < 5; i++)
+    for (let j = i + 1; j < 5; j++) {
+      const a = calls[i],
+        b = calls[j];
+      if (Math.abs(a.centroid - b.centroid) / Math.min(a.centroid, b.centroid) < 0.2 && Math.abs(a.bands[2] - b.bands[2]) < 10) clash.push(`${a.name}/${b.name}`);
+    }
+  check(`the calls sound different (centroids ${calls.map((r) => r.centroid).join(", ")}): ${clash.length ? clash.join(" ") : "all apart"}`, !clash.length);
 }
 // Nothing clips: the limiter holds every scene's peaks under full scale.
 const peaky = results.filter((r) => r.peak > -1);
