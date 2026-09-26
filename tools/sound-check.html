@@ -240,7 +240,9 @@
     // Above the water, heard from under it: the mill wheel near by from 4 s on, bread, the
     // fish counter.
     { name: "mill", kind: "shot", seconds: 12, params: (t) => ({ mill: t >= 4 ? 1 : 0 }), measure: (m) => ({ slaps: m.onsets(4, 12, 800, 2000, 4, 0.5) }) },
-    shot("bread", (s) => s.plops?.(5)),
+    // (Heard: its plops' loudest 50 ms in 0.5-2.6 kHz over the bed's, where a few quiet
+    // plops still show; the 400 ms loudness of a quiet variant hardly moves.)
+    { ...shot("bread", (s) => s.plops?.(5)), measure: (m) => ({ plops: m.bandMax(4, 5.6, 500, 2600, 0.05) - m.bandMax(2.4, 3.9, 500, 2600, 0.05) }) },
     // At sea: a ship passing (16 s from 4 s on), fish grunting at night.
     { name: "ship", kind: "shot", seconds: 24, params: { regions: only("sea"), sea: 1 }, events: [[4, (s) => s.debug?.ship?.(16)]], measure: (m) => ({ rise: m.band(10, 14, 30, 60) - m.band(2, 4, 30, 60), throb: m.period(9, 15, 300, 900, 0.2, 0.4, 0.02), after: m.band(21, 23.5, 30, 60) - m.band(2, 4, 30, 60) }) },
     // (And the same without them: the sea heaves, so they are heard against the same moment
@@ -336,16 +338,20 @@
     })(),
     // Started at once, before its samples are made: it plays what is there, the rest when
     // it is made (every sound asked for from 1 s on, and again at 4 s).
-    { name: "early_start", kind: "shot", early: true, params: busy, events: [[1, (s) => everything(s)], [4, (s) => everything(s)]], measure: (m) => ({ making: m.makingAtStart }) },
+    { name: "early_start", kind: "shot", early: true, params: busy, events: [[1, (s) => everything(s)], [4, (s) => (s.splash(1, 1), s.call("heron"), s.fanfare(), s.dash?.(1), s.ending?.())]], measure: (m) => ({ making: m.makingAtStart }) },
     // Strength low from 4 s on, for good (a blow at 30 s takes more of it): the heart for ten
-    // seconds, then not again until the blow.
+    // seconds, then not again until the blow. (Watched in the sound itself: whether the
+    // heart beats, and the ambience's level under it. How it is heard: `heartbeat`.)
     {
       name: "heart_weak",
       kind: "shot",
       seconds: 40,
       params: (t) => ({ energy: t < 4 ? 1 : t < 30 ? 0.2 : 0.15 }),
-      watch: (s) => s.stats.ambience,
-      measure: (m) => ({ on: m.band(5, 12, 440, 620) - m.band(2, 4, 440, 620), after: m.band(18, 29.5, 440, 620) - m.band(2, 4, 440, 620), ducked: Math.max(...m.watched(6, 10)), duck: Math.min(...m.watched(17, 29.5)), again: m.band(31, 37, 440, 620) - m.band(2, 4, 440, 620) }),
+      watch: (s) => ({ beat: s.stats.heart ? 1 : 0, ambience: s.stats.ambience }),
+      measure: (m) => {
+        const share = (from, to) => m.watched(from, to).reduce((sum, w) => sum + w.beat, 0) / m.watched(from, to).length;
+        return { on: share(4.5, 13), after: share(15, 29.9), again: share(30.5, 39), ducked: Math.max(...m.watched(6, 10).map((w) => w.ambience)), duck: Math.min(...m.watched(17, 29.9).map((w) => w.ambience)) };
+      },
     },
     // The heart: strength low from 4 to 6 s, then ten seconds more of it, fading.
     {

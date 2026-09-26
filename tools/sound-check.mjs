@@ -196,7 +196,7 @@ if (get("heartbeat")?.extra) {
 }
 if (get("heart_weak")?.extra) {
   const e = get("heart_weak").extra;
-  check(`heart_weak: strength low for good, the heart heard at first (+${e.on} dB at 440-620 Hz, the river ducked to ${e.ducked}), then quiet (${e.after}, ≤ 0.7) and the river no longer ducked (${e.duck}), back with a blow (+${e.again})`, e.on >= 1 && e.ducked <= 0.8 && e.after <= 0.7 && e.duck >= 0.99 && e.again >= 1);
+  check(`heart_weak: strength low for good, the heart beating at first (${e.on} of the time, the river ducked to ${e.ducked}), then not (${e.after}) and the river no longer ducked (${e.duck}), back with a blow (${e.again})`, e.on >= 0.95 && e.ducked <= 0.8 && e.after === 0 && e.duck >= 0.99 && e.again >= 0.95);
 }
 for (const r of ["kingfisher", "heron", "merganser", "seal", "bear"].map((k) => get(`call_${k}`)).filter(Boolean)) check(`${r.name} ≥ +5 dB over the bed on a phone, under water: ${r.dPhone}`, r.dPhone >= 5);
 const calls = ["kingfisher", "heron", "merganser", "seal", "bear"].map((k) => get(`solo_call_${k}`)).filter(Boolean);
@@ -243,7 +243,9 @@ if (get("bed_flood")?.extra && get("bed_roar_near")) check(`bed_flood clatters a
 if (get("floe_knock")) check(`floe_knock ≥ +6 dB over the bed on a phone: ${get("floe_knock").dPhone}`, get("floe_knock").dPhone >= 6);
 // The river's small sounds: heard, but under the bed (400 ms loudness up by +0.3 to +4 dB).
 if (get("mill")?.extra) check(`mill: its paddles slap (${get("mill").extra.slaps} in 8 s, 5-9), under the bed (Δ400ms ${get("mill").d400} ≤ +3)`, get("mill").extra.slaps >= 5 && get("mill").extra.slaps <= 9 && get("mill").d400 <= 3);
-for (const name of ["bread", "counter"]) if (get(name)) check(`${name} heard but quiet (Δ400ms ${get(name).d400}, +0.3..+3)`, get(name).d400 >= 0.3 && get(name).d400 <= 3);
+if (get("counter")) check(`counter heard but quiet (Δ400ms ${get("counter").d400}, +0.3..+3)`, get("counter").d400 >= 0.3 && get("counter").d400 <= 3);
+// (Bread: a few plops at random, some of them faint, so heard by its band's loudest 50 ms.)
+if (get("bread")?.extra) check(`bread heard (its plops +${get("bread").extra.plops} dB at 0.5-2.6 kHz, ≥ 3) but quiet (Δ400ms ${get("bread").d400} ≤ 3)`, get("bread").extra.plops >= 3 && get("bread").d400 <= 3);
 if (get("ship")?.extra) {
   const e = get("ship").extra;
   check(`ship: its drone rises (+${e.rise} dB at 30-60 Hz) and is gone after (${e.after}), the screw throbs every ${e.throb} s (0.22-0.32)`, e.rise >= 3 && e.after <= 1.5 && e.throb >= 0.22 && e.throb <= 0.32);

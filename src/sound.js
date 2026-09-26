@@ -66,7 +66,7 @@ const MIX = {
   // (Rain on the surface as heard from under it: this much of it through the muffle; the
   // pings carry the rest.)
   rainDip: 0.55,
-  pings: 0.5,
+  pings: 0.6,
   clatter: 1.1,
   chirp: 0.35,
   air: 0.5,
