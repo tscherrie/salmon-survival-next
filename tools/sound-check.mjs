@@ -115,8 +115,17 @@ if (byKind("solo").length) {
   console.log(`\non their own              LUFS(400ms) centroid  %<150 150-500 .5-1.5k 1.5-4k >4k`);
   for (const r of byKind("solo")) console.log(`${r.name.padEnd(23)} ${pad(r.full, 8)} ${pad(r.centroid, 9)}   ${r.bands.map((b) => pad(b.toFixed(1), 5)).join(" ")}`);
 }
+if (byKind("stress").length) {
+  console.log(`\nstress                   LUFS  loudest  peak  most voices  nodes made  base  sample MB  update µs`);
+  for (const r of byKind("stress")) console.log(`${r.name.padEnd(23)} ${pad(r.full, 5)} ${pad(r.loudest, 8)} ${pad(r.peak, 5)} ${pad(r.maxLive, 12)} ${pad(r.nodes, 11)} ${pad(r.baseNodes, 5)} ${pad(((r.bytes ?? 0) / 1e6).toFixed(1), 10)} ${pad(r.updateUs, 10)}`);
+}
+const extras = results.filter((r) => r.extra);
+if (extras.length) {
+  console.log(`\nmeasured for their checks`);
+  for (const r of extras) console.log(`${r.name.padEnd(23)} ${Object.entries(r.extra).map(([k, v]) => `${k} ${Array.isArray(v) ? v.join("/") : v}`).join("  ")}`);
+}
 const starts = results.map((r) => r.startMs);
-console.log(`\nfirst click (building the graph): ${Math.min(...starts)}-${Math.max(...starts)} ms; ambient bubbles made ${Math.max(...results.map((r) => r.bubbleNodes))} nodes in 8 s at most`);
+console.log(`\nfirst click (building the graph): ${Math.min(...starts)}-${Math.max(...starts)} ms, ${Math.max(...results.map((r) => r.baseNodes))} nodes; ambient sounds made ${Math.max(...results.filter((r) => r.kind !== "stress").map((r) => r.bubbleNodes))} nodes in a scene at most; loudest peak ${Math.max(...results.map((r) => r.peak))} dBFS (${results.reduce((a, r) => (r.peak > a.peak ? r : a)).name})`);
 
 // ---- The checks.
 const get = (name) => results.find((r) => r.name === name);
@@ -132,6 +141,13 @@ for (const name of ["thump_body", "thump_rock", "thump_wood", "thump_net", "thum
 const splashes = ["solo_splash_L0.3", "solo_splash_L1", "solo_splash_L3", "solo_splash_L5.5"].map(get);
 if (splashes.every(Boolean)) check(`splash centroid falls with size: ${splashes.map((r) => r.centroid).join(" > ")}`, splashes.every((r, i) => i === 0 || r.centroid < splashes[i - 1].centroid));
 for (const r of byKind("cross")) if (r.name !== "leap_whole") check(`${r.name}: in the air within 4 dB (${(r.above - r.under).toFixed(1)}), no jump over 4 dB (${r.jump})`, Math.abs(r.above - r.under) <= 4 && r.jump <= 4);
+// Nothing clips: the limiter holds every scene's peaks under full scale.
+const peaky = results.filter((r) => r.peak > -1);
+check(`every scene's peak ≤ -1 dBFS: ${peaky.length ? peaky.map((r) => `${r.name} ${r.peak}`).join(", ") : `loudest ${Math.max(...results.map((r) => r.peak))}`}`, !peaky.length);
+if (get("stress_30s")) {
+  const r = get("stress_30s");
+  check(`stress_30s: at most 48 voices at once (${r.maxLive}), at most 3000 nodes made (${r.nodes}), base graph at most 95 nodes (${r.baseNodes})`, r.maxLive <= 48 && r.nodes <= 3000 && r.baseNodes <= 95);
+}
 console.log("");
 for (const [what, ok] of checks) console.log(`${ok ? "ok  " : "FAIL"} ${what}`);
 if (errors.length) console.log(`\npage errors:\n${errors.join("\n")}`);

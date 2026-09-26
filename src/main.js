@@ -315,9 +315,10 @@ async function start() {
   const lore = createLore({ hud });
   const loreRegions = {};
   const sound = createSound();
-  // What the sound is told each frame (one object, filled in afresh, not a new one each time).
-  const soundState = { rain: 0, daylight: 1, stir: 0, roar: 0, sea: 0, submerged: 1, depth: 1 };
-  const soundRegions = {};
+  // What the sound is told each frame (one object, filled in afresh, not a new one each time;
+  // every field there from the start, so that its shape never changes).
+  const soundRegions = { brook: 0, upper: 0, middle: 1, lower: 0, estuary: 0, sea: 0 };
+  const soundState = { rain: 0, daylight: 1, stir: 0, roar: 0, sea: 0, submerged: 1, depth: 1, regions: soundRegions, flow: 1, depthRel: 0.5, ice: 0, flood: 0, energy: 1, breath: 1, winded: false, danger: 0, home: 0, mill: 0 };
   mark("hud");
   // Badges for everything found and done the first time; the logbook keeps the collection.
   const badges = createBadges({ sound });
@@ -2527,12 +2528,23 @@ async function start() {
     falls.light(0.25 + 0.75 * sunUp);
     soundState.rain = rain;
     soundState.daylight = sunUp;
-    soundState.stir = Math.max(0, fish.relative.length() - salmon.speeds().cruise) / Math.max(1, salmon.speeds().sprint);
+    const speeds = salmon.speeds();
+    soundState.stir = Math.max(0, fish.relative.length() - speeds.cruise) / Math.max(1, speeds.sprint);
     soundState.roar = falls.roar(fish.position, fish.river.s);
     soundState.sea = regionWeights(fish.river.s, soundRegions).sea;
     // (The sound eases this over the moment of crossing.)
     soundState.submerged = above ? 0 : 1;
     soundState.depth = depth;
+    // The water round the fish: how hard it runs, how far down the fish is between the
+    // surface and the bed, ice over it, a spate (the snowmelt's counts half; none at sea).
+    const fishLevel = level(fish.river.s);
+    soundState.flow = fish.flow.speed;
+    soundState.depthRel = clamp((fishLevel - fish.position.y) / Math.max(0.1, fishLevel - bed(fish.river.s, fish.river.u)), 0, 1);
+    soundState.ice = world.ice ?? 0;
+    soundState.flood = Math.max(events.flood, 0.5 * conditions.flood) * (1 - soundState.sea);
+    soundState.energy = fish.energy;
+    soundState.breath = fish.breath;
+    soundState.winded = !!fish.winded && dead <= 0;
     sound.update(dt, soundState);
     updateWaterLevel();
     // The surface's ripples (and the caustic net they make) slide downstream; at sea, barely.

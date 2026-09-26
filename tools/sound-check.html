@@ -50,6 +50,84 @@
   // On its own (the beds stopped), four times over: its sound is different every time.
   const solo = (name, fire, params = {}) => ({ name, kind: "solo", params, events: [1, 2.5, 4, 5.5].map((t) => [t, fire]) });
   const air = (t) => (t >= 4 && t < 6 ? 0 : 1);
+  // One-hot region weights (the sound reads `regions` when it has them).
+  const REGIONS = ["brook", "upper", "middle", "lower", "estuary", "sea"];
+  const only = (name) => Object.fromEntries(REGIONS.map((r) => [r, r === name ? 1 : 0]));
+  // Hunters as the game's warnings list has them (main.js warnings()): each its own key.
+  const hunter = (kind, i = 0) => ({ kind, key: { kind, i }, level: 0, coiled: false, pan: 0, near: 0.5 });
+  // Every sound there is, at once (for the silent scenes: none of it may be heard).
+  function everything(s) {
+    s.leap(1.2);
+    s.splash(1.2, 3);
+    s.dive?.(1.2);
+    s.call("kingfisher");
+    for (const kind of ["heron", "merganser", "seal", "bear"]) s.call(kind);
+    s.chime("gold");
+    s.fanfare();
+    for (const kind of ["body", "rock", "wood", "net", "hook", "ice"]) s.thump(kind);
+    s.thunder(1);
+    s.otter();
+    s.reel();
+    s.snap();
+    s.nip();
+    s.swallow(0.8);
+    s.eaten("fish");
+    s.eaten("bird");
+    s.dash?.(1);
+    s.jaws?.(1, 1);
+    s.denied?.();
+    s.charge?.(0.9);
+    s.leapResult?.("cleared");
+    s.leapResult?.("failed");
+    const list = [hunter("pike"), hunter("seal", 1), hunter("heron", 2), hunter("bear", 3)];
+    list.forEach((h, i) => Object.assign(h, { level: 0.4 + 0.2 * i, coiled: i === 3, pan: i / 2 - 0.75 }));
+    s.warn?.(list);
+    s.storm?.();
+    s.lightning?.(1);
+    s.plops?.(5);
+    s.counter?.();
+    s.growth?.();
+    s.victory?.();
+    s.spawn?.();
+    s.hatch?.();
+    s.ending?.();
+    s.debug?.ship?.();
+    s.debug?.grunt?.();
+    s.debug?.chirp?.();
+  }
+  // Everything the world can be at once, for the silent scenes and the stress.
+  const busy = { rain: 1, roar: 1, flood: 1, danger: 1, energy: 0.1, breath: 0, winded: true, home: 1, mill: 1, flow: 6, depthRel: 0.9, regions: only("brook") };
+  // The stress: half a minute of everything the game can throw at the sound at once.
+  function stress() {
+    const events = [];
+    const hunters = [hunter("pike"), hunter("seal", 1), hunter("heron", 2), hunter("bear", 3)];
+    for (let t = 0.5; t < 29.5; t += 0.3) events.push([t, (s) => s.splash(1 + (t % 1), 1 + ((t * 7) % 5))]);
+    for (let t = 0.7; t < 29.5; t += 0.9) events.push([t, (s) => (s.dash ? s.dash(2) : s.nip())]);
+    for (let t = 0.6; t < 29.5; t += 0.2) events.push([t, (s) => s.denied?.()]);
+    for (let t = 0.4; t < 29.5; t += 1 / 30)
+      events.push([
+        t,
+        (s) => {
+          // Four hunters, each noticing, hunting, coiling and striking in turn, 3 s a round.
+          hunters.forEach((h, i) => {
+            const u = ((t + i * 0.7) % 3) / 3;
+            h.level = u < 0.3 ? 0.4 : u < 0.6 ? 0.6 : u < 0.85 ? 0.8 : 1;
+            h.coiled = u >= 0.85 && u < 0.95;
+            h.pan = Math.sin(t * 0.7 + i);
+            h.near = 0.5 + 0.5 * Math.sin(t + i);
+          });
+          s.warn?.(hunters.slice().sort((a, b) => b.level - a.level));
+        },
+      ]);
+    for (let t = 1; t < 29.5; t += 2.3) events.push([t, (s) => s.call(["kingfisher", "heron", "merganser", "seal", "bear"][Math.floor(t) % 5])]);
+    for (let t = 2; t < 29.5; t += 1.7) events.push([t, (s) => s.thump(["body", "rock", "wood", "net", "hook", "ice"][Math.floor(t) % 6])]);
+    for (let t = 3; t < 29.5; t += 4.1) events.push([t, (s) => (s.chime("gold"), s.fanfare(), s.victory?.(), s.growth?.())]);
+    for (let t = 1.5; t < 29.5; t += 3.3) events.push([t, (s) => (s.thunder(Math.random()), s.lightning?.(0.9), s.otter(), s.reel(), s.eaten(t % 2 < 1 ? "fish" : "bird"))]);
+    for (let t = 5; t < 29.5; t += 5) events.push([t, (s) => (s.storm?.(), s.plops?.(5), s.counter?.(), s.leapResult?.("cleared"), s.leapResult?.("failed"), s.debug?.ship?.(), s.debug?.grunt?.(), s.debug?.chirp?.())]);
+    for (let t = 0.3; t < 29.5; t += 1 / 30) events.push([t, (s) => s.charge?.(0.5 - 0.5 * Math.cos((t / 1.2) * Math.PI * 2))]);
+    events.push([29.4, (s) => s.charge?.(-1)]);
+    return events;
+  }
   const SCENES = [
     { name: "bed_river", kind: "bed", params: {} },
     { name: "bed_river_night", kind: "bed", params: { daylight: 0 } },
@@ -76,15 +154,16 @@
     {
       name: "muted_then_leap",
       kind: "silent",
-      params: (t) => ({ submerged: t >= 4.1 && t < 5.1 ? 0 : 1, roar: 1, rain: 1 }),
+      params: (t) => ({ ...busy, submerged: t >= 4.1 && t < 5.1 ? 0 : 1 }),
       events: [
         [1, (s) => s.toggle()],
         [4, (s) => s.leap(1.2)],
-        [5.05, (s) => (s.splash(0.9, 1.2), s.dive?.(1.2), s.call())],
+        [5.05, (s) => (s.splash(0.9, 1.2), s.dive?.(1.2), s.call(), everything(s))],
       ],
     },
-    { name: "hushed_then_chime", kind: "silent", params: {}, events: [[1, (s) => s.hush(true)], [4, (s) => (s.chime("gold"), s.fanfare(), s.thump(), s.splash(1.2, 3))]] },
-    { name: "hidden_then_thunder", kind: "silent", params: {}, events: [[1, (s) => s.hush(true, "hidden")], [4, (s) => (s.thunder(1), s.otter(), s.reel())]] },
+    { name: "hushed_then_chime", kind: "silent", params: busy, events: [[1, (s) => s.hush(true)], [4, (s) => (s.chime("gold"), s.fanfare(), s.thump(), s.splash(1.2, 3), everything(s))]] },
+    { name: "hidden_then_thunder", kind: "silent", params: { ...busy, ice: 1, regions: only("sea"), daylight: 0 }, events: [[1, (s) => s.hush(true, "hidden")], [4, (s) => (s.thunder(1), s.otter(), s.reel(), everything(s))]] },
+    { name: "stress_30s", kind: "stress", seconds: 30, params: (t) => ({ ...busy, roar: (t / 5) % 2 < 1 ? 1 : 0.3, ice: (t / 7) % 2 < 1 ? 0 : 1, regions: only(REGIONS[Math.floor(t / 5) % 6]), submerged: t % 6 > 5.4 ? 0 : 1 }), events: stress() },
     shot("thump_body", (s) => s.thump("body")),
     shot("thump_rock", (s) => s.thump("rock")),
     shot("thump_wood", (s) => s.thump("wood")),
@@ -138,9 +217,11 @@
       return p;
     };
     const dt = 1 / 30;
-    const events = [...(scene.events ?? [])];
+    const events = [...(scene.events ?? [])].sort((a, b) => a[0] - b[0]);
     let shotNodes = 0;
     let bubbleNodes = 0;
+    let maxLive = 0;
+    let updateMs = 0;
     sound.update(dt, params(0));
     for (let i = 1; i < seconds / dt - 1; i++) {
       const t = i * dt;
@@ -148,17 +229,22 @@
         if (i === 3 && scene.kind === "solo") for (const s of ctx.sources) if (s.loop) s.stop();
         while (events.length && events[0][0] <= t + 1e-6) {
           const before = ctx.count;
-          events.shift()[1](sound);
+          events.shift()[1](sound, t);
           shotNodes += ctx.count - before;
         }
         const before = ctx.count;
-        sound.update(dt, params(t));
+        const p = params(t);
+        const u0 = performance.now();
+        sound.update(dt, p);
+        updateMs += performance.now() - u0;
         bubbleNodes += ctx.count - before;
+        maxLive = Math.max(maxLive, sound.stats?.live ?? 0);
         ctx.resume();
       });
     }
     const buffer = await ctx.startRendering();
-    return { buffer, startMs, baseNodes, shotNodes, bubbleNodes, live: sound.stats?.live };
+    const stats = sound.stats ?? {};
+    return { buffer, startMs, baseNodes, shotNodes, bubbleNodes, maxLive, nodes: ctx.count, bytes: stats.bytes, updateUs: (updateMs * 1000) / (seconds / dt), live: stats.live };
   }
 
   // ---- Measuring.
@@ -265,21 +351,107 @@
     return { centroid: moment / total, bands: bands.map((p) => (100 * p) / total) };
   }
 
+  // Butterworth fourth-order lowpass; and a band between two of them.
+  function lowpass(x, f, q) {
+    const w = (2 * Math.PI * f) / SR,
+      cos = Math.cos(w),
+      alpha = Math.sin(w) / (2 * q),
+      a0 = 1 + alpha;
+    return biquad(x, [(1 - cos) / 2 / a0, (1 - cos) / a0, (1 - cos) / 2 / a0], [1, (-2 * cos) / a0, (1 - alpha) / a0]);
+  }
+  const band = (x, f0, f1) => lowpass(lowpass(highpass(highpass(x, f0, 0.5412), f0, 1.3066), f1, 0.5412), f1, 1.3066);
+  const plainDb = (ms) => 10 * Math.log10(ms + 1e-20);
+  // What a scene can measure beyond the usual: loudness in a band, its swell and period,
+  // onsets in it (pulses, ticks), left against right.
+  function toolbox(channels, k, kp) {
+    const cache = new Map();
+    const banded = (f0, f1) => {
+      const key = `${f0}-${f1}`;
+      if (!cache.has(key)) cache.set(key, channels.map((c) => band(c, f0, f1)));
+      return cache.get(key);
+    };
+    const bandSeries = (from, to, f0, f1, window, hop = window / 2) => {
+      const b = banded(f0, f1);
+      const out = [];
+      for (let t = from; t + window <= to + 1e-9; t += hop) out.push(plainDb(meanSquare(b, t, t + window)));
+      return out;
+    };
+    const tb = {
+      loud: (from, to) => loud(k, from, to),
+      loudPhone: (from, to) => loud(kp, from, to),
+      loudest: (from, to, window) => loudest(k, from, to, window),
+      loudestPhone: (from, to, window) => loudest(kp, from, to, window),
+      band: (from, to, f0, f1) => plainDb(meanSquare(banded(f0, f1), from, to)),
+      bandSeries,
+      // How much a band swells and falls (standard deviation of its loudness in dB).
+      modulation(from, to, f0, f1, window = 0.5) {
+        const s = bandSeries(from, to, f0, f1, window, window / 2);
+        const m = s.reduce((a, v) => a + v, 0) / s.length;
+        return Math.sqrt(s.reduce((a, v) => a + (v - m) * (v - m), 0) / s.length);
+      },
+      // The period (s) at which the band's loudness repeats best, between two lags.
+      period(from, to, f0, f1, minLag, maxLag, window = 0.25) {
+        const s = bandSeries(from, to, f0, f1, window, window);
+        const m = s.reduce((a, v) => a + v, 0) / s.length;
+        const d = s.map((v) => v - m);
+        let best = 0,
+          bestLag = 0;
+        for (let lag = Math.round(minLag / window); lag <= Math.round(maxLag / window) && lag < d.length - 4; lag++) {
+          let c = 0;
+          for (let i = 0; i + lag < d.length; i++) c += d[i] * d[i + lag];
+          c /= d.length - lag;
+          if (c > best) (best = c), (bestLag = lag);
+        }
+        return bestLag * window;
+      },
+      // Onsets: the band's loudness (20 ms windows) rising by `rise` dB over its low of the
+      // 60 ms before, at least `spacing` s apart.
+      onsets(from, to, f0, f1, rise = 6, spacing = 0.04) {
+        const hop = 0.005;
+        const s = bandSeries(from, to, f0, f1, 0.02, hop);
+        let count = 0,
+          last = -1e9;
+        for (let i = 12; i < s.length - 1; i++) {
+          let low = Infinity;
+          for (let j = i - 12; j < i - 2; j++) low = Math.min(low, s[j]);
+          if (s[i] - low >= rise && s[i] >= s[i - 1] && s[i] >= s[i + 1] && (i - last) * hop >= spacing) {
+            count++;
+            last = i;
+          }
+        }
+        return count;
+      },
+      // Left over right (dB) in [from, to), with what was there in [bedFrom, bedTo) taken off.
+      pan(from, to, bedFrom, bedTo) {
+        const e = (c, a, b) => {
+          let sum = 0;
+          for (let i = Math.floor(a * SR); i < Math.floor(b * SR); i++) sum += c[i] * c[i];
+          return sum / ((b - a) * SR);
+        };
+        const l = Math.max(1e-20, e(channels[0], from, to) - e(channels[0], bedFrom, bedTo));
+        const r = Math.max(1e-20, e(channels[1], from, to) - e(channels[1], bedFrom, bedTo));
+        return 10 * Math.log10(l / r);
+      },
+      spectrum: (from, to) => spectrum(channels, from, to),
+    };
+    return tb;
+  }
+
   function measure(scene, r) {
     const channels = [r.buffer.getChannelData(0), r.buffer.getChannelData(1)];
     const k = channels.map(kweight);
     const kp = channels.map((c) => kweight(phone(c)));
-    const out = { name: scene.name, kind: scene.kind, startMs: +r.startMs.toFixed(1), baseNodes: r.baseNodes, shotNodes: r.shotNodes, bubbleNodes: r.bubbleNodes };
+    const out = { name: scene.name, kind: scene.kind, startMs: +r.startMs.toFixed(1), baseNodes: r.baseNodes, shotNodes: r.shotNodes, bubbleNodes: r.bubbleNodes, maxLive: r.maxLive, nodes: r.nodes, bytes: r.bytes, updateUs: +r.updateUs.toFixed(1) };
     let peak = 0;
     for (const c of channels) for (let i = 0; i < c.length; i++) peak = Math.max(peak, Math.abs(c[i]));
     out.peak = +(20 * Math.log10(peak + 1e-20)).toFixed(1);
     const r1 = (v) => +v.toFixed(1);
     if (scene.kind === "bed") {
-      out.full = r1(loud(k, 3, 8));
-      out.phone = r1(loud(kp, 3, 8));
-      Object.assign(out, spectrum(channels, 3, 8));
+      out.full = r1(loud(k, 3, seconds));
+      out.phone = r1(loud(kp, 3, seconds));
+      Object.assign(out, spectrum(channels, 3, seconds));
     } else if (scene.kind === "silent") {
-      out.full = r1(loud(k, 3, 8));
+      out.full = r1(loud(k, 3, seconds));
     } else if (scene.kind === "cross") {
       // Momentary loudness (400 ms) under water before, in the air, and after.
       for (const [name, ks] of [
@@ -293,14 +465,26 @@
         out["jump100" + name] = r1(loudest(ks, 3.8, 7.4, 0.1) - loudest(ks, 2, 4, 0.1));
       }
     } else if (scene.kind === "shot") {
+      // (Heard over the bed from 4 s on; `at` for a cue that comes later in its scene.)
+      const at = scene.at ?? 4,
+        until = Math.min(seconds - 0.5, at + 3);
       out.bedFull = r1(loud(k, 2.5, 4));
-      out.dFull = r1(loudest(k, 4, 7, 0.05) - loudest(k, 2.5, 4, 0.05));
-      out.dPhone = r1(loudest(kp, 4, 7, 0.05) - loudest(kp, 2.5, 4, 0.05));
-      out.d400 = r1(loudest(k, 4, 7, 0.4) - loudest(k, 2.5, 4, 0.4));
-      out.centroid = Math.round(spectrum(channels, 4, 5.5).centroid);
+      out.dFull = r1(loudest(k, at, until, 0.05) - loudest(k, 2.5, 4, 0.05));
+      out.dPhone = r1(loudest(kp, at, until, 0.05) - loudest(kp, 2.5, 4, 0.05));
+      out.d400 = r1(loudest(k, at, until, 0.4) - loudest(k, 2.5, 4, 0.4));
+      out.centroid = Math.round(spectrum(channels, at, at + 1.5).centroid);
+    } else if (scene.kind === "stress") {
+      out.full = r1(loud(k, 1, seconds));
+      out.loudest = r1(loudest(k, 1, seconds - 0.5, 0.4));
     } else {
       out.full = r1(loudest(k, 1, 7.5, 0.4));
       Object.assign(out, spectrum(channels, 1, 7.5));
+    }
+    // What the scene measures of its own (by name, for the checks).
+    if (scene.measure) {
+      const extra = scene.measure(toolbox(channels, k, kp));
+      for (const [key, v] of Object.entries(extra)) extra[key] = typeof v === "number" ? +v.toFixed(2) : v;
+      out.extra = extra;
     }
     if (out.centroid) out.centroid = Math.round(out.centroid);
     if (out.bands) out.bands = out.bands.map(r1);

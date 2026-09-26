@@ -7,15 +7,18 @@
 // Browsers allow sound only after a click, a tap or a key, so it starts then; T turns it
 // off and on. Off, hidden, or paused for long, the sound device is let go (a phone's battery).
 //
-// Everything goes through one master (the volume, off, the hush of a pause) and a
-// compressor, in four groups:
-//   water    what sounds in the water: the beds, bubbles, eddies, what the fish does
+// Everything goes through one master (the volume, off, the hush of a pause), a compressor
+// and a limiter that keeps the peaks under full scale, in five groups:
+//   water    what sounds in the water: the beds (through their own `ambience` bus, which the
+//            heartbeat ducks), bubbles, eddies, what the fish does, hunters coming
 //   surface  what sounds at the surface: splashes, rain on it, the white water of a fall
 //   air      what sounds in the air: the air itself, calls, thunder, the angler's reel
+//   body     the fish's own body: its heart, its gills, its jaws
 //   ui       the bells of a new stage of life or a badge
-// How far under the ear is (`submerged`, 0..1, eased over about a tenth of a second) opens
-// one and closes the others. The crossing itself (breaking out, going back in) is heard
-// as it is, neither in the water nor out of it.
+// All but the bells go through `world` first, which the white veil of spawning closes (a
+// bell can still ring into the silence). How far under the ear is (`submerged`, 0..1,
+// eased over about a tenth of a second) opens one and closes the others. The crossing
+// itself (breaking out, going back in) is heard as it is, neither in the water nor out of it.
 //
 // The noise and the short sounds heard often (bubbles, splashes, knocks) are made ahead as
 // plain samples, a slice at a time while the game loads, and played back as they are: a
@@ -33,6 +36,10 @@ const EASE = 0.12;
 const STEER = 0.05;
 // Above this (Hz) the surface takes the edge off what comes through it.
 const DIM = 800;
+// At most this many one-shots at once; the river's own small sounds (bubbles, ticks) stop
+// coming at the lower number, so that a cue is never the one left out.
+const VOICES = 64;
+const AMBIENT_VOICES = 32;
 // How loud each part is, relative to the others (set by ear and by tools/sound-check.mjs).
 const MIX = {
   rush: 0.37,
@@ -84,22 +91,31 @@ export function createSound() {
     submerged = 1,
     crossing = NaN,
     clearTone = 7000,
-    live = 0;
+    // The voices sounding now (one-shots of any kind), the most at once, the nodes made
+    // since the start and the bytes of sample memory held (for stats and the checks).
+    live = 0,
+    peakLive = 0,
+    made = 0,
+    bytes = 0;
   // What keeps it quiet (a pause, the logbook, death, a hidden page): each its own reason,
   // so that one ending does not end the others.
   const hushes = new Set();
+  // The world round the fish as update() was last told it (one object, kept).
+  const here = { brook: 0, upper: 0, middle: 1, lower: 0, estuary: 0, sea: 0, flow: 1, depthRel: 0.5, ice: 0, flood: 0, energy: 1, breath: 1, winded: false, danger: 0, home: 0, mill: 0 };
   const raw = {};
   const banks = {};
   const sized = new Map();
   const workshop = createWorkshop();
   workshop.add(makeAll(raw));
 
-  const toBuffer = (channels) => {
-    const buffer = context.createBuffer(channels.length, channels[0].length, RATE);
+  // (`rate` lower for the deep sounds, which need no more: half the memory at 24 kHz.)
+  const toBuffer = (channels, rate = RATE) => {
+    const buffer = context.createBuffer(channels.length, channels[0].length, rate);
     channels.forEach((data, c) => buffer.getChannelData(c).set(data));
+    bytes += channels.length * channels[0].length * 4;
     return buffer;
   };
-  const bank = (name) => (banks[name] ??= raw[name].map(toBuffer));
+  const bank = (name) => (banks[name] ??= raw[name].map((channels) => toBuffer(channels)));
   // A sound that depends on a size, made the first few times it is asked for and then
   // reused (a few versions of each, so no two in a row are quite the same).
   function variant(key, make, count = 3) {
@@ -109,8 +125,19 @@ export function createSound() {
     return pick(list);
   }
 
+  // When each cue last sounded (by the audio clock): one that comes again within its own
+  // few seconds is let pass. Keys are short fixed strings, so asking allocates nothing.
+  const cooled = new Map();
+  function coolOk(key, seconds) {
+    const now = context.currentTime;
+    if (now - (cooled.get(key) ?? -1e9) < seconds) return false;
+    cooled.set(key, now);
+    return true;
+  }
+
   function loop(buffer) {
     const source = context.createBufferSource();
+    made++;
     source.buffer = buffer;
     source.loop = true;
     source.loopStart = 0.25;
@@ -119,6 +146,7 @@ export function createSound() {
     return source;
   }
   const filter = (type, frequency, q = 0.7) => {
+    made++;
     const f = context.createBiquadFilter();
     f.type = type;
     f.frequency.value = frequency;
@@ -126,6 +154,7 @@ export function createSound() {
     return f;
   };
   const amp = (value) => {
+    made++;
     const g = context.createGain();
     g.gain.value = value;
     return g;
@@ -167,18 +196,37 @@ export function createSound() {
       if (!asleep && enabled && !hushes.size && !document.hidden && context.state !== "running" && context.state !== "closed") context.resume().catch(() => {});
     };
     master = amp(0);
+    made += 2;
     const compressor = context.createDynamicsCompressor();
     compressor.threshold.value = -22;
     compressor.ratio.value = 3;
-    master.connect(compressor).connect(context.destination);
+    // The limiter: hard and fast over the last few decibels, so that nothing clips however
+    // much comes at once. (A browser's compressor adds back what it takes at full scale --
+    // about 2.3 dB for this one -- so the trim before it takes that off again first, and
+    // everything under its threshold passes as it was.)
+    const limiter = context.createDynamicsCompressor();
+    limiter.threshold.value = -4;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.08;
+    master.connect(compressor).connect(amp(0.77)).connect(limiter).connect(context.destination);
+    // Everything but the bells: closed by the white veil of spawning.
+    const world = amp(1);
+    world.connect(master);
     const [brown] = bank("brown");
     const [pink] = bank("pink");
 
-    // The groups. Water: clear under water; from above only a dull, low murmur of it.
+    // The groups. Water: clear under water; from above only a dull, low murmur of it. What
+    // must keep its brightness (rain pinging on the surface overhead) joins after its top.
     const water = amp(1);
     const waterTone = filter("lowpass", 7000, -3);
+    const waterBright = amp(1);
     const waterDuck = amp(1);
-    water.connect(waterTone).connect(waterDuck).connect(master);
+    water.connect(waterTone).connect(waterBright).connect(waterDuck).connect(world);
+    // The beds and the river's small sounds, on a bus of their own (the heartbeat ducks it).
+    const ambience = amp(1);
+    ambience.connect(water);
     // Surface and air: bright in the air; under water through the surface's muffle.
     const surface = amp(1);
     const air = amp(1);
@@ -186,33 +234,36 @@ export function createSound() {
     surface.connect(through);
     air.connect(through);
     const dry = amp(0);
-    through.connect(dry).connect(master);
+    through.connect(dry).connect(world);
     const [dim, dimTop] = muffle();
     const wet = amp(1);
     through.connect(dim);
-    dimTop.connect(wet).connect(master);
+    dimTop.connect(wet).connect(world);
+    // The fish's own body: the same in the water and out of it.
+    const body = amp(1);
+    body.connect(world);
     const ui = amp(MIX.ui);
     ui.connect(master);
 
     // The rush: the river's deep, broad voice, felt as much as heard.
     const rushFilter = filter("lowpass", 420, 0.6);
     const rushGain = amp(0);
-    loop(brown).connect(rushFilter).connect(rushGain).connect(water);
+    loop(brown).connect(rushFilter).connect(rushGain).connect(ambience);
     const rumbleGain = amp(0);
-    loop(brown).connect(filter("lowpass", 90, 0.9)).connect(rumbleGain).connect(water);
+    loop(brown).connect(filter("lowpass", 90, 0.9)).connect(rumbleGain).connect(ambience);
     // The flow over it: the water moving past stones, a band in the low middle (where a
     // phone's small speaker still plays), and a burble above that, both slowly swelling.
     const flowBand = filter("bandpass", 480, 0.9);
     const flowGain = amp(0);
-    loop(pink).connect(flowBand).connect(flowGain).connect(water);
+    loop(pink).connect(flowBand).connect(flowGain).connect(ambience);
     const burbleBand = filter("bandpass", 820, 1.6);
     const burbleGain = amp(0);
-    loop(pink).connect(burbleBand).connect(burbleGain).connect(water);
+    loop(pink).connect(burbleBand).connect(burbleGain).connect(ambience);
     // The roar of falling and breaking water under it: broad, mid-low, churning.
     const roarGain = amp(0);
-    loop(pink).connect(filter("bandpass", 420, 0.6)).connect(roarGain).connect(water);
+    loop(pink).connect(filter("bandpass", 420, 0.6)).connect(roarGain).connect(ambience);
     const roarLowGain = amp(0);
-    loop(brown).connect(filter("lowpass", 160, 0.8)).connect(roarLowGain).connect(water);
+    loop(brown).connect(filter("lowpass", 160, 0.8)).connect(roarLowGain).connect(ambience);
     // The same white water at the surface: bright and hissing in the air.
     const whiteWaterGain = amp(0);
     loop(pink).connect(filter("bandpass", 1300, 0.5)).connect(whiteWaterGain).connect(surface);
@@ -220,10 +271,10 @@ export function createSound() {
     const washFilter = filter("lowpass", 300, 0.5);
     const washGain = amp(0);
     const washSource = loop(pink);
-    washSource.connect(washFilter).connect(washGain).connect(water);
+    washSource.connect(washFilter).connect(washGain).connect(ambience);
     const washMid = filter("bandpass", 380, 0.8);
     const washMidGain = amp(0);
-    washSource.connect(washMid).connect(washMidGain).connect(water);
+    washSource.connect(washMid).connect(washMidGain).connect(ambience);
     // The air, for leaps: the river as it sounds from above it, babbling and splashing over
     // the stones, and the open hiss of the world above the water.
     const airGain = amp(0);
@@ -237,10 +288,11 @@ export function createSound() {
       const band = filter("bandpass", 220 + i * 140, 6 + i);
       const level = amp(0);
       const pan = context.createStereoPanner ? context.createStereoPanner() : null;
+      if (pan) made++;
       if (pan) pan.pan.value = (i / 4) * 1.4 - 0.7;
       source.connect(band).connect(level);
-      if (pan) level.connect(pan).connect(water);
-      else level.connect(water);
+      if (pan) level.connect(pan).connect(ambience);
+      else level.connect(ambience);
       gurgles.push({ band, level, base: 220 + i * 140 });
     }
     // Rain on the surface; and under it, the patter of the drops come down through the
@@ -248,11 +300,15 @@ export function createSound() {
     const rainGain = amp(0);
     loop(pink).connect(filter("highpass", 700, 0.5)).connect(filter("lowpass", 3200, 0.5)).connect(rainGain).connect(surface);
     const rainUnderGain = amp(0);
-    loop(pink).connect(filter("bandpass", 1500, 0.8)).connect(rainUnderGain).connect(water);
+    loop(pink).connect(filter("bandpass", 1500, 0.8)).connect(rainUnderGain).connect(ambience);
     nodes = {
+      world,
       water,
+      waterBright,
+      ambience,
       surface,
       air,
+      body,
       ui,
       gurgles,
       knobs: {
@@ -283,20 +339,53 @@ export function createSound() {
     return true;
   }
 
-  // A made sound played once: its source and its level, two nodes, nothing to schedule.
-  function play(buffer, bus, loudness, at = context.currentTime + 0.01, rate = 1) {
-    const source = context.createBufferSource();
-    source.buffer = buffer;
-    source.playbackRate.value = rate;
-    const gain = amp(loudness);
-    source.connect(gain).connect(bus);
-    source.start(at);
+  // A sound played once, kept count of while it sounds; when it ends its last node (the
+  // one on the bus) is let go, and the rest with it.
+  function voice(source, last) {
     live++;
+    if (live > peakLive) peakLive = live;
     source.onended = () => {
       live--;
-      gain.disconnect();
+      last.disconnect();
     };
     return source;
+  }
+  // Too many at once: the river's small sounds give way first, then everything new.
+  const crowded = (ambient = false) => live >= (ambient ? AMBIENT_VOICES : VOICES);
+  const oscillator = (type = "sine") => {
+    made++;
+    const o = context.createOscillator();
+    o.type = type;
+    return o;
+  };
+  const bufferSource = (buffer) => {
+    made++;
+    const b = context.createBufferSource();
+    b.buffer = buffer;
+    return b;
+  };
+  // Left (-1) to right (1); where a browser has no panner, in the middle.
+  const panner = (value) => {
+    if (!context.createStereoPanner) return null;
+    made++;
+    const p = context.createStereoPanner();
+    p.pan.value = value;
+    return p;
+  };
+  // A made sound played once: its source and its level, two nodes (three placed left or
+  // right), nothing to schedule. `ambient` for the river's own small sounds, which give way
+  // first when too much is sounding.
+  function play(buffer, bus, loudness, at = context.currentTime + 0.01, rate = 1, pan = 0, ambient = false) {
+    if (crowded(ambient)) return null;
+    const source = bufferSource(buffer);
+    source.playbackRate.value = rate;
+    const gain = amp(loudness);
+    source.connect(gain);
+    const p = pan ? panner(pan) : null;
+    const last = p ? gain.connect(p) : gain;
+    last.connect(bus);
+    source.start(at);
+    return voice(source, last);
   }
   const bubbles = (count, spread, low, loudness, at) => {
     const n = Math.max(2, Math.round(count / 3) * 3);
@@ -306,16 +395,17 @@ export function createSound() {
   // A click: a few milliseconds of noise in a band, as of jaws or a bill closing (for the
   // sounds too rare to be worth making ahead).
   function click(at, loudness, frequency, length, bus) {
-    const source = context.createBufferSource();
-    source.buffer = bank("white")[0];
+    if (crowded()) return;
+    const source = bufferSource(bank("white")[0]);
     const band = filter("bandpass", frequency, 1.4);
-    const env = context.createGain();
+    const env = amp(0);
     env.gain.setValueAtTime(0, at);
     env.gain.linearRampToValueAtTime(loudness, at + 0.002);
     env.gain.exponentialRampToValueAtTime(0.0005, at + length);
     source.connect(band).connect(env).connect(bus);
     source.start(at, Math.random() * 2);
     source.stop(at + length + 0.02);
+    voice(source, env);
   }
 
   // On, off and hushed: the master level follows, and the device is let go when nothing is
@@ -385,7 +475,7 @@ export function createSound() {
     },
     // What it is doing (for the diagnostics): the device's state and the sounds playing.
     get stats() {
-      return { state: context?.state ?? "none", time: context?.currentTime ?? 0, live, asleep, level, hushes: [...hushes], sleepIn: (sleepAt - performance.now()) / 1000 };
+      return { state: context?.state ?? "none", time: context?.currentTime ?? 0, live, peakLive, nodes: made, bytes, asleep, level, hushes: [...hushes], sleepIn: (sleepAt - performance.now()) / 1000 };
     },
     // For extensions (src/mods.js): the context and the groups to play into, while the
     // sound is on and running, else null. What plays into a group goes through the master,
@@ -436,18 +526,18 @@ export function createSound() {
       if (!ready()) return;
       const at = context.currentTime + 0.02;
       if (kind === "fish") {
-        const source = context.createBufferSource();
-        source.buffer = bank("white")[0];
+        const source = bufferSource(bank("white")[0]);
         const low = filter("lowpass", 520, 0.7);
-        const env = context.createGain();
+        const env = amp(0);
         env.gain.setValueAtTime(0, at);
         env.gain.linearRampToValueAtTime(0.7, at + 0.12);
         env.gain.exponentialRampToValueAtTime(0.0005, at + 0.5);
         source.connect(low).connect(env).connect(nodes.water);
         source.start(at, Math.random() * 2);
         source.stop(at + 0.55);
-        const osc = context.createOscillator();
-        const gulp = context.createGain();
+        voice(source, env);
+        const osc = oscillator();
+        const gulp = amp(0);
         osc.frequency.setValueAtTime(170, at + 0.2);
         osc.frequency.exponentialRampToValueAtTime(46, at + 0.7);
         gulp.gain.setValueAtTime(0, at + 0.2);
@@ -456,6 +546,7 @@ export function createSound() {
         osc.connect(gulp).connect(nodes.water);
         osc.start(at + 0.19);
         osc.stop(at + 0.9);
+        voice(osc, gulp);
         for (let k = 0; k < 3; k++) click(at + 0.62 + k * 0.09, 0.5 - k * 0.12, 800, 0.05, nodes.water);
         bubbles(8, 0.6, 0.6, 0.7, at + 0.3);
       } else {
@@ -484,13 +575,13 @@ export function createSound() {
     // Breaking out of the water in a leap (or thrown out over a fall).
     leap(size = 1) {
       if (!ready()) return;
-      play(pick(bank("breach")), master, MIX.breach * (0.7 + 0.1 * Math.min(size, 5)), undefined, random(0.92, 1.08) / (1 + 0.04 * size));
+      play(pick(bank("breach")), nodes.world, MIX.breach * (0.7 + 0.1 * Math.min(size, 5)), undefined, random(0.92, 1.08) / (1 + 0.04 * size));
     },
     // Back in: the water closing over the fish.
     dive(size = 1) {
       if (!ready()) return;
       const k = step(size);
-      play(variant(`blup:${k}`, () => makeBlup(stepSize(k)), 2), master, MIX.blup, undefined, random(0.92, 1.08));
+      play(variant(`blup:${k}`, () => makeBlup(stepSize(k)), 2), nodes.world, MIX.blup, undefined, random(0.92, 1.08));
     },
     // A call from above the water: the kingfisher's thin, piercing whistle.
     call(kind = "kingfisher") {
@@ -500,8 +591,8 @@ export function createSound() {
       // by about what the surface takes from it at its pitch, it is still heard.)
       const loud = MIX.call * (1 + 7.5 * submerged);
       for (let k = 0; k < 2; k++) {
-        const osc = context.createOscillator();
-        const env = context.createGain();
+        const osc = oscillator();
+        const env = amp(0);
         const t0 = at + k * 0.16;
         osc.frequency.setValueAtTime(3600, t0);
         osc.frequency.exponentialRampToValueAtTime(4300, t0 + 0.09);
@@ -511,6 +602,7 @@ export function createSound() {
         osc.connect(env).connect(nodes.air);
         osc.start(t0);
         osc.stop(t0 + 0.14);
+        voice(osc, env);
       }
       void kind;
     },
@@ -522,8 +614,7 @@ export function createSound() {
       const bus = amp(0.55);
       bus.connect(nodes.ui);
       // The swell under it.
-      const swell = context.createBufferSource();
-      swell.buffer = bank("white")[0];
+      const swell = bufferSource(bank("white")[0]);
       const band = filter("bandpass", 600, 0.7);
       const swellGain = amp(0);
       swellGain.gain.setValueAtTime(0, at);
@@ -534,24 +625,25 @@ export function createSound() {
       swell.connect(band).connect(swellGain).connect(bus);
       swell.start(at, Math.random() * 2);
       swell.stop(at + 2.8);
+      voice(swell, swellGain);
       // The bells: a major arpeggio up an octave and a half, the last held.
       const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
       notes.forEach((f, i) => {
         const t0 = at + 0.12 + i * 0.13;
         const hold = i === notes.length - 1 ? 2.2 : 0.9;
         let out = bus;
-        if (context.createStereoPanner) {
-          out = context.createStereoPanner();
-          out.pan.value = (i / (notes.length - 1)) * 0.8 - 0.4;
-          out.connect(bus);
+        const p = panner((i / (notes.length - 1)) * 0.8 - 0.4);
+        if (p) {
+          p.connect(bus);
+          out = p;
         }
         for (const [ratio, level] of [
           [1, 0.16],
           [2.01, 0.05],
           [3.02, 0.018],
         ]) {
-          const osc = context.createOscillator();
-          const env = context.createGain();
+          const osc = oscillator();
+          const env = amp(0);
           osc.frequency.value = f * ratio;
           env.gain.setValueAtTime(0, t0);
           env.gain.linearRampToValueAtTime(level, t0 + 0.012);
@@ -559,6 +651,7 @@ export function createSound() {
           osc.connect(env).connect(out);
           osc.start(t0);
           osc.stop(t0 + hold + 0.05);
+          voice(osc, env);
         }
       });
       bubbles(14, 1.4, 1.2, 0.8, at + 0.2);
@@ -578,8 +671,8 @@ export function createSound() {
           [1, 0.12],
           [2.01, 0.035],
         ]) {
-          const osc = context.createOscillator();
-          const env = context.createGain();
+          const osc = oscillator();
+          const env = amp(0);
           osc.frequency.value = f * ratio;
           env.gain.setValueAtTime(0, t0);
           env.gain.linearRampToValueAtTime(level, t0 + 0.01);
@@ -587,6 +680,7 @@ export function createSound() {
           osc.connect(env).connect(bus);
           osc.start(t0);
           osc.stop(t0 + hold + 0.05);
+          voice(osc, env);
         }
       });
       bubbles(5, 0.5, 1.1, 0.6, at + 0.1);
@@ -597,10 +691,9 @@ export function createSound() {
       if (!ready()) return;
       const at = context.currentTime + 0.02;
       if (near > 0.6) click(at, 1.2 * near, 2400, 0.06, nodes.air);
-      const source = context.createBufferSource();
-      source.buffer = bank("brown")[0];
+      const source = bufferSource(bank("brown")[0]);
       const low = filter("lowpass", 200 + 500 * near, 0.6);
-      const env = context.createGain();
+      const env = amp(0);
       const length = 2.6 + 2.6 * (1 - near);
       const peak = MIX.thunder * (0.35 + 0.65 * near);
       env.gain.setValueAtTime(0, at);
@@ -610,6 +703,7 @@ export function createSound() {
       source.connect(low).connect(env).connect(nodes.air);
       source.start(at, Math.random() * 3);
       source.stop(at + length + 0.1);
+      voice(source, env);
     },
     // Otters at play: quick, high chirps and squeaks.
     otter() {
@@ -617,8 +711,8 @@ export function createSound() {
       const at = context.currentTime + 0.02;
       const n = 2 + Math.floor(Math.random() * 4);
       for (let k = 0; k < n; k++) {
-        const osc = context.createOscillator();
-        const env = context.createGain();
+        const osc = oscillator();
+        const env = amp(0);
         const t0 = at + k * (0.09 + Math.random() * 0.08);
         const f = 1800 + Math.random() * 1400;
         osc.type = "triangle";
@@ -630,6 +724,7 @@ export function createSound() {
         osc.connect(env).connect(nodes.air);
         osc.start(t0);
         osc.stop(t0 + 0.11);
+        voice(osc, env);
       }
     },
     // A fishing line: the reel's ratchet ticking as it is pulled in, or the line snapping.
@@ -641,8 +736,8 @@ export function createSound() {
       if (!ready()) return;
       const at = context.currentTime + 0.01;
       click(at, 1.2, 2600, 0.03, nodes.surface);
-      const osc = context.createOscillator();
-      const env = context.createGain();
+      const osc = oscillator();
+      const env = amp(0);
       osc.frequency.setValueAtTime(900, at);
       osc.frequency.exponentialRampToValueAtTime(260, at + 0.25);
       env.gain.setValueAtTime(0, at);
@@ -651,6 +746,7 @@ export function createSound() {
       osc.connect(env).connect(nodes.surface);
       osc.start(at);
       osc.stop(at + 0.32);
+      voice(osc, env);
     },
     // A nip from another young fish: a small sharp tick and a bubble.
     nip() {
@@ -666,9 +762,28 @@ export function createSound() {
       play(pick(bank("rise")), nodes.surface, MIX.rise * loud, undefined, random(0.9, 1.1));
     },
     // Each frame: the river round the fish. `submerged` 0..1 (or `above`), the rest as the
-    // world has them.
-    update(dt, { rain = 0, daylight = 1, stir = 0, roar = 0, sea = 0, above = false, submerged: under = above ? 0 : 1, depth = 1 } = {}) {
+    // world has them: `regions` the weights of brook .. sea (without them, river or sea by
+    // `sea`), `flow` the current's speed, `depthRel` 0 at the surface .. 1 on the bed, `ice`
+    // the cover over it, `flood` a spate; the fish's `energy`, `breath` and `winded`; `danger`
+    // a strike about to come, `home` the scent of the home brook, `mill` how near the wheel.
+    update(dt, { rain = 0, daylight = 1, stir = 0, roar = 0, sea = 0, above = false, submerged: under = above ? 0 : 1, depth = 1, regions = null, flow = 1, depthRel = 0.5, ice = 0, flood = 0, energy = 1, breath = 1, winded = false, danger = 0, home = 0, mill = 0 } = {}) {
       if (!context || !nodes) return;
+      here.brook = regions ? (regions.brook ?? 0) : 0;
+      here.upper = regions ? (regions.upper ?? 0) : 0;
+      here.middle = regions ? (regions.middle ?? 0) : 1 - sea;
+      here.lower = regions ? (regions.lower ?? 0) : 0;
+      here.estuary = regions ? (regions.estuary ?? 0) : 0;
+      here.sea = regions ? (regions.sea ?? sea) : sea;
+      here.flow = flow;
+      here.depthRel = depthRel;
+      here.ice = ice;
+      here.flood = flood;
+      here.energy = energy;
+      here.breath = breath;
+      here.winded = winded;
+      here.danger = danger;
+      here.home = home;
+      here.mill = mill;
       if (performance.now() >= sleepAt) sleep();
       submerged += (under - submerged) * (1 - Math.exp(-dt / EASE));
       if (context.state !== "running") return;
@@ -681,7 +796,7 @@ export function createSound() {
       if (clock > nextBubble) {
         const rate = 1.2 + 5 * stirred + 4 * rain + 14 * roar;
         nextBubble = clock + -Math.log(1 - Math.random()) / rate;
-        if (submerged > 0.5 && wanted()) play(pick(bank("bubble")), nodes.water, (0.05 + Math.random() * 0.08) * MIX.bubble, now + 0.02, random(0.9, 1.15));
+        if (submerged > 0.5 && wanted()) play(pick(bank("bubble")), nodes.ambience, (0.05 + Math.random() * 0.08) * MIX.bubble, now + 0.02, random(0.9, 1.15), 0, true);
       }
       if (clock > nextGurgle) {
         nextGurgle = clock + 0.35 + Math.random() * 0.9;
