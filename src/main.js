@@ -2779,10 +2779,14 @@ async function start() {
             });
         }
       },
+      // Build everything in reach -- the river's blocks and the places along it -- however
+      // long it takes.
       async settle(maxSeconds = 20) {
         const start = performance.now();
-        while (terrain.pending > 0 && performance.now() - start < maxSeconds * 1000) {
+        features.update(fish.river.s, 0);
+        while ((terrain.pending > 0 || features.pending > 0) && performance.now() - start < maxSeconds * 1000) {
           terrain.update({ x: camera.position.x, z: camera.position.z, s: cameraRiver.s, u: cameraRiver.u }, { budget: 50, near: clamp(0.28 + fish.length * 0.1, 0.35, 1) });
+          features.update(fish.river.s, 50);
           await new Promise((r) => setTimeout(r, 0));
         }
       },

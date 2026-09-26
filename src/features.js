@@ -2030,6 +2030,10 @@ export function createFeatures(scene, { rocks, locate, surfaceMaterial = null })
       }
       return null;
     },
+    // How many places are still being built.
+    get pending() {
+      return queue.length;
+    },
     // At a start or a jump: what is near at once, the rest a little every frame after.
     prime(s, near = 150) {
       this.update(s, 0);

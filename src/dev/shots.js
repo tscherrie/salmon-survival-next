@@ -60,6 +60,14 @@ export const SHOTS = [
   { name: "nordlicht", stage: "spawner", at: 4300, season: "winter", hour: 23, event: "aurora", view: { eye: [-6, 0, 1.2], target: [20, 0, 12] } },
   // A storm: a flash flood coming down, the water brown.
   { name: "sturm", stage: "parr", at: 3500, season: "autumn", hour: 15, event: "storm" },
+  // The bed close, as a fry sees it: the stones and the sand between them.
+  { name: "kiesbett", stage: "fry", at: 240, season: "summer", hour: 13, view: { eye: [-3, 0, -3.8], target: [3, 0, -6.6] } },
+  // Sand and gravel half and half, in the big river: stone tops out of the sand.
+  { name: "sandkies", stage: "parr", at: 4250, season: "summer", hour: 13, view: { eye: [-4, 0, -15.5], target: [4, 0, -19] } },
+  // A wide gravel reach from above the bed, out to some forty metres: does it repeat?
+  { name: "kacheln", stage: "parr", at: 6000, season: "summer", hour: 13, view: { eye: [-10, 0, -5], target: [22, 0, -14] } },
+  // The bank at the waterline from just above the water.
+  { name: "ufer", stage: "parr", at: 2500, season: "summer", hour: 15, view: { eye: [-6, -10, 0.8], target: [8, -24, 0.3] } },
 ];
 
 const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -309,7 +317,19 @@ export async function runShots(salmon, query) {
   const logTimer = setInterval(sendLog, 3000);
   document.body.classList.add("shooting");
   const { course } = salmon;
-  // The river built all round, the fish and its neighbours settled into it.
+  // The river built all round, the fish and its neighbours settled into it. (The game held
+  // meanwhile: it moves only in run()'s fixed steps, so the fish -- and every view placed
+  // from it -- comes out in the same place however long the building took.)
+  salmon.pause(true);
+  // (And chance starts over here: how many frames ran while the game loaded, drawing on it,
+  // depends on how long the loading took.)
+  let a = 7;
+  Math.random = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
   await salmon.settle(40);
   await salmon.run(1.5);
   await salmon.settle(20);

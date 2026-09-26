@@ -201,6 +201,91 @@ function load(name, srgb) {
   return textures.get(name);
 }
 
+// A gravel photograph's normal map with the height of its stones in the alpha, taken from the
+// height scan that comes with it: one texture for both, as the bed already binds fifteen of
+// the sixteen a shader may. Packed once, on arrival; until then the texture is empty (and
+// not sent to the graphics card, so it is made at its full size when the data comes).
+// Raw bytes, not a canvas: a canvas would premultiply the alpha and spoil the normal where
+// the stones are low.
+//   levels(h, blurred): the scan's value (0..1) at a texel, and its slow swell there, to
+// the height kept (0 the deepest hollow, 1 the top of a stone).
+function shape(normalName, heightName, levels, swell = 0) {
+  const key = `${normalName}+${heightName}`;
+  if (!textures.has(key)) {
+    const texture = new THREE.DataTexture(null, 1, 1);
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = 8;
+    textures.set(key, texture);
+    photoTextures.push(texture);
+    arriving.push(packShape(texture, normalName, heightName, levels, swell));
+  }
+  return textures.get(key);
+}
+async function packShape(texture, normalName, heightName, levels, swell) {
+  const loader = new THREE.ImageLoader();
+  const [normal, height] = await Promise.all([loader.loadAsync(`./assets/${normalName}.jpg`), loader.loadAsync(`./assets/${heightName}.jpg`)]);
+  const pixels = (image, size) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const g = canvas.getContext("2d", { willReadFrequently: true });
+    g.drawImage(image, 0, 0, size, size);
+    return g.getImageData(0, 0, size, size).data;
+  };
+  const size = normal.width;
+  const N = pixels(normal, size);
+  // The height at the normal map's size, averaged down from the scan's finer grid in full
+  // precision (the scans have few grey levels; the average gains some back).
+  const scale = Math.max(1, Math.round(height.width / size));
+  const H = pixels(height, size * scale);
+  const h = new Float32Array(size * size);
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      let sum = 0;
+      for (let j = 0; j < scale; j++) for (let i = 0; i < scale; i++) sum += H[((y * scale + j) * size * scale + x * scale + i) * 4];
+      h[y * size + x] = sum / (scale * scale * 255);
+    }
+  // Its slow swell, a box blur that wraps round the tile (if asked for).
+  const blurred = new Float32Array(size * size);
+  if (swell > 0) {
+    const line = new Float32Array(size * size);
+    const k = 2 * swell + 1;
+    for (let y = 0; y < size; y++) {
+      let sum = 0;
+      for (let i = -swell; i <= swell; i++) sum += h[y * size + ((i + size) % size)];
+      for (let x = 0; x < size; x++) {
+        line[y * size + x] = sum / k;
+        sum += h[y * size + ((x + swell + 1) % size)] - h[y * size + ((x - swell + size) % size)];
+      }
+    }
+    for (let x = 0; x < size; x++) {
+      let sum = 0;
+      for (let j = -swell; j <= swell; j++) sum += line[((j + size) % size) * size + x];
+      for (let y = 0; y < size; y++) {
+        blurred[y * size + x] = sum / k;
+        sum += line[((y + swell + 1) % size) * size + x] - line[((y - swell + size) % size) * size + x];
+      }
+    }
+  }
+  const data = new Uint8Array(size * size * 4);
+  // (Rows turned over: a photograph is turned over on its way to the card, raw data is not.)
+  for (let y = 0; y < size; y++) {
+    const from = (size - 1 - y) * size;
+    for (let x = 0; x < size; x++) {
+      const a = (from + x) * 4,
+        b = (y * size + x) * 4;
+      data[b] = N[a];
+      data[b + 1] = N[a + 1];
+      data[b + 2] = N[a + 2];
+      data[b + 3] = Math.round(Math.min(1, Math.max(0, levels(h[from + x], blurred[from + x]))) * 255);
+    }
+  }
+  texture.image = { data, width: size, height: size };
+  texture.needsUpdate = true;
+}
+
 // A tangent-space normal from a GL normal map, laid flat in the world's x-z plane.
 const flatNormal = (map, p) => {
   const n = texture(map, p).xyz.mul(2).sub(1);
@@ -239,26 +324,41 @@ const triplanar = (map, normalMap, P, N, s) => {
 // A world-space normal as the view-space normal a node material wants.
 export const toViewNormal = (n) => normalize(cameraViewMatrix.mul(vec4(n, 0)).xyz);
 
+// A second look at a gravel photograph, against its repeat: turned (cos 0.8, sin 0.6), a
+// little larger and shifted. Where the two looks meet, the taller stone of the two shows,
+// so the seam runs round the stones and nothing is printed over anything.
+const turned = (q) => vec2(q.x.mul(0.8).add(q.y.mul(0.6)), q.x.mul(-0.6).add(q.y.mul(0.8))).mul(0.89);
+const turnedUV = (q) => turned(q).add(vec2(0.37, 0.61));
+// A tangent-space normal of look A or B, laid in the flat frame (x, up, z).
+const lookA = (n) => vec3(n.x, n.z, n.y);
+const lookB = (n) => vec3(n.x.mul(0.8).sub(n.y.mul(0.6)), n.z, n.x.mul(0.6).add(n.y.mul(0.8)));
+// How much of a gravel bed a fill (of sand or silt, to a height from 0 to 1) leaves covered,
+// on average over the stones of each photograph (fitted to their height scans): what the
+// bed shows far off, where its stones are too small to tell apart.
+const coveredPebbles = (fill) => smoothstep(-0.14, 0.98, fill);
+const coveredStones = (fill) => smoothstep(-0.02, 1.06, fill);
+
 export async function createBedMaterial() {
-  const maps = await Promise.all([
-    load("ganges_river_pebbles_diff", true),
-    load("ganges_river_pebbles_nor_gl", false),
-    load("river_small_rocks_diff", true),
-    load("river_small_rocks_nor_gl", false),
-    load("damp_sand_diff", true),
-    load("damp_sand_nor_gl", false),
-    load("mud_forest_diff", true),
-    load("mud_forest_nor_gl", false),
-    load("rock_face_03_diff", true),
-    load("rock_face_03_nor_gl", false),
-    load("forest_ground_04_diff", true),
-  ]);
-  const [pebbleMap, pebbleNormal, stonesMap, stonesNormal, sandMap, sandNormal, mudMap, mudNormal, rockMap, rockNormal, landMap] = maps;
+  const pebbleMap = load("ganges_river_pebbles_diff", true),
+    stonesMap = load("river_small_rocks_diff", true),
+    sandMap = load("damp_sand_diff", true),
+    sandNormal = load("damp_sand_nor_gl", false),
+    mudMap = load("mud_forest_diff", true),
+    mudNormal = load("mud_forest_nor_gl", false),
+    rockMap = load("rock_face_03_diff", true),
+    rockNormal = load("rock_face_03_nor_gl", false),
+    landMap = load("forest_ground_04_diff", true);
+  // The two gravels' normals with their heights: the pebbles' scan as it is, remapped; the
+  // broken stones' scan is mostly a slow swell with the stones on it, so only the stones
+  // are kept (the difference from its blur, stretched to the same spread).
+  const pebbleShape = shape("ganges_river_pebbles_nor_gl", "ganges_river_pebbles_disp", (h) => (h - 0.28) / 0.47);
+  const stonesShape = shape("river_small_rocks_nor_gl", "river_small_rocks_disp", (h, swell) => ((h - swell + 0.016) / 0.031) * 0.9 + 0.05, 8);
   const tint = uniform(new THREE.Color(1, 1, 1));
   const material = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0 });
-  // Worked out once, with the colour, and read by the normal and the roughness.
+  // Worked out once, with the colour, and read by the normal, the roughness and the shade.
   const bedNormal = property("vec3", "bedNormal");
   const bedRough = property("float", "bedRough");
+  const bedShade = property("float", "bedShade");
   const ground = attribute("ground", "vec4");
   const extra = attribute("bedExtra", "vec3");
   const geometryNormal = varying(modelNormalMatrix.mul(normalGeometry));
@@ -266,11 +366,11 @@ export async function createBedMaterial() {
     const P = positionWorld;
     const shore = extra.x,
       mossy = extra.y,
-      roughness = extra.z;
+      broken = extra.z.clamp(0, 1);
     const Nw = normalize(geometryNormal).toVar();
     // Where the drawn surface stands far steeper than its normal says (the skirts that hide
-    // the seams between blocks, a cut bank), trust the surface: it is rock, laid on from
-    // the sides, not gravel smeared down it from above.
+    // the seams between blocks, a cut bank), trust the surface; and a face this steep is
+    // rock, whatever the course lays on it: gravel would only be smeared down it.
     const Ng = normalize(cross(dFdx(P), dFdy(P))).toVar();
     If(dot(Ng, cameraPosition.sub(P)).lessThan(0), () => {
       Ng.assign(Ng.negate());
@@ -280,85 +380,223 @@ export async function createBedMaterial() {
       Nw.assign(Ng);
       w.assign(mix(w, vec4(0, 0, 0, 1), smoothstep(0.6, 0.3, abs(Ng.y))));
     });
+    w.assign(mix(w, vec4(0, 0, 0, 1), smoothstep(0.62, 0.42, Nw.y)));
+    // The ground's own frame: the photographs' x, up and z laid on its facing.
+    const reference = select(abs(Nw.x).lessThan(0.9), vec3(1, 0, 0), vec3(0, 0, 1));
+    const tx = normalize(reference.sub(Nw.mul(dot(reference, Nw)))).toVar();
+    const tz = normalize(cross(tx, Nw)).toVar();
     const q = P.xz;
-    const color = vec3(0).toVar();
+    // How big a pixel is on the ground: far off the stones are too small to tell apart, the
+    // heights in the photographs are filtered to their mean, and the bed is drawn from what
+    // it holds on average instead.
     const px = length(fwidth(q));
-    const tangentNormal = vec3(0).toVar();
-    const rockWorld = Nw.toVar();
-    const rough = float(0).toVar();
+    const far = smoothstep(0.03, 0.25, px);
 
-    // Gravel: rounded pebbles, rougher broken stones where the water is wild.
-    If(w.x.greaterThan(0.01), () => {
-      const pebbles = twoScale(pebbleMap, q, 1 / 21.6);
-      const pn = flatNormal(pebbleNormal, q.div(21.6));
-      const stones = vec3(0).toVar();
-      const sn = vec3(0, 1, 0).toVar();
-      If(roughness.greaterThan(0.01), () => {
-        stones.assign(twoScale(stonesMap, q, 1 / 29));
-        sn.assign(flatNormal(stonesNormal, q.div(29)));
+    // Where the course lays both, gravel and sand in patches: bars of clean stones, sandy
+    // flats.
+    const patch = noise2(q.mul(0.06).add(1.7)).mul(0.65).add(noise2(q.mul(0.17).add(4.1)).mul(0.35)).sub(0.5);
+    const shift = patch.mul(0.5).mul(min(1, w.x.mul(w.y).mul(4)));
+    w.x.assign(max(w.x.sub(shift), 0));
+    w.y.assign(max(w.y.add(shift), 0));
+
+    // Which look of each photograph shows where: a slow noise, sharpened.
+    const pick = smoothstep(0.45, 0.55, noise2(q.mul(0.045).add(5.3)));
+
+    // The level sand and silt fill to between the stones: the more of them the course
+    // lays, the higher, until only the tops of the tallest stones show. Ripples in the sand.
+    const ripple = sin(P.x.mul(2.6).add(sin(P.z.mul(0.37)).mul(1.8)).add(sin(P.z.mul(1.1).add(P.x.mul(0.2))).mul(0.6)));
+    const sandH = float(0.42).add(ripple.mul(0.04));
+    const siltH = float(0.3);
+    const fill = max(sandH.add(w.y.sub(w.x)), siltH.add(w.z.sub(w.x))).toVar();
+
+    // Gravel: the two looks of each photograph, the taller stone winning where they meet;
+    // then pebbles and broken stones side by side the same way.
+    const gColor = vec3(0).toVar(),
+      gNormal = vec3(0, 1, 0).toVar(),
+      gH = float(0.43).toVar(),
+      gLength = float(1).toVar();
+    const gravelOf = (map, shapeMap, tile) => {
+      const uvA = q.mul(tile),
+        uvB = turnedUV(q.mul(tile));
+      const a = vec4(0.5, 0.5, 1, 0.5).toVar(),
+        b = vec4(0.5, 0.5, 1, 0.5).toVar();
+      If(pick.lessThan(0.999), () => {
+        a.assign(texture(shapeMap, uvA));
       });
-      const g = mix(pebbles, stones.mul(vec3(0.95, 0.97, 1)), roughness);
-      const gn = normalize(mix(pn, sn, roughness));
-      // Sand settles in the hollows between the stones.
-      const height = dot(g, vec3(0.3, 0.5, 0.2));
-      const fill = select(w.y.greaterThan(0.01), smoothstep(height.add(0.05), height.add(0.25), w.y.mul(0.9)), float(0));
-      w.y.addAssign(w.x.mul(fill));
-      w.x.mulAssign(fill.oneMinus());
-      color.addAssign(g.mul(w.x));
-      tangentNormal.addAssign(gn.mul(w.x));
-      rough.addAssign(w.x.mul(0.72));
+      If(pick.greaterThan(0.001), () => {
+        b.assign(texture(shapeMap, uvB));
+      });
+      const tA = a.w.add(pick.oneMinus().mul(1.5)),
+        tB = b.w.add(pick.mul(1.5));
+      const edge = mix(0.05, 0.4, far);
+      const top = max(tA, tB).sub(edge);
+      const toB = max(tB.sub(top), 0).div(max(max(tA.sub(top), 0).add(max(tB.sub(top), 0)), 1e-4));
+      const color = vec3(0).toVar();
+      If(toB.lessThan(0.999), () => {
+        color.addAssign(texture(map, uvA).rgb.mul(toB.oneMinus()));
+      });
+      If(toB.greaterThan(0.001), () => {
+        color.addAssign(texture(map, uvB).rgb.mul(toB));
+      });
+      // (The normals' length before they are made unit again: short where the finer mips
+      // average stones of every slant, which is roughness the lighting must know about.)
+      const nA = a.xyz.mul(2).sub(1),
+        nB = b.xyz.mul(2).sub(1);
+      const normal = lookA(nA).mul(toB.oneMinus()).add(lookB(nB).mul(toB));
+      return { color, normal, height: mix(a.w, b.w, toB), length: mix(length(nA), length(nB), toB) };
+    };
+    If(w.x.greaterThan(0.01), () => {
+      const pebbles = gravelOf(pebbleMap, pebbleShape, 1 / 21.6);
+      gColor.assign(pebbles.color);
+      gNormal.assign(pebbles.normal);
+      gH.assign(pebbles.height);
+      gLength.assign(pebbles.length);
+      If(broken.greaterThan(0.01), () => {
+        const stones = gravelOf(stonesMap, stonesShape, 1 / 29);
+        const tP = gH.add(broken.oneMinus().mul(1.2)),
+          tS = stones.height.add(broken.mul(1.2));
+        const edge = mix(0.05, 0.4, far);
+        const top = max(tP, tS).sub(edge);
+        const toS = max(tS.sub(top), 0).div(max(max(tP.sub(top), 0).add(max(tS.sub(top), 0)), 1e-4));
+        gColor.assign(mix(gColor, stones.color.mul(vec3(0.95, 0.97, 1)), toS));
+        gNormal.assign(mix(gNormal, stones.normal, toS));
+        gH.assign(mix(gH, stones.height, toS));
+        gLength.assign(mix(gLength, stones.length, toS));
+      });
+      // The pebbles were photographed in a warmer river: white, pink and violet quartzite.
+      // These are northern stones: granite, gneiss and schist, the pinks gone brown, and no
+      // stone as pale as the palest of those (their brightness eased off at the top).
+      const grey = dot(gColor, vec3(0.3, 0.55, 0.15));
+      gColor.assign(mix(vec3(grey), gColor, 0.7).mul(vec3(1, 0.95, 0.84)));
+      gColor.assign(gColor.div(gColor.mul(0.8).add(1)).mul(1.2));
     });
-    If(w.y.greaterThan(0.01), () => {
-      const sand = twoScale(sandMap, q, 1 / 20.4).mul(vec3(0.78, 0.8, 0.82));
-      color.addAssign(sand.mul(w.y));
-      const sn = flatNormal(sandNormal, q.div(20.4)).toVar();
-      // Current ripples across the flow.
-      const ripple = sin(P.x.mul(2.6).add(sin(P.z.mul(0.37)).mul(1.8)).add(sin(P.z.mul(1.1).add(P.x.mul(0.2))).mul(0.6)));
-      sn.x.addAssign(cos(P.x.mul(2.6).add(sin(P.z.mul(0.37)).mul(1.8))).mul(0.12));
-      tangentNormal.addAssign(normalize(sn).mul(w.y));
-      color.subAssign(sand.mul(w.y.mul(0.06).mul(smoothstep(0.3, 1, ripple.negate()))));
-      rough.addAssign(w.y.mul(0.9));
+
+    // On a bank the photograph laid from above is drawn out down the slope: there the
+    // pebbles are laid on from the side the bank faces as well, and the taller stone of the
+    // two shows. (Steeper than this it is rock; above the water, the forest floor.)
+    const side = smoothstep(0.8, 0.64, Nw.y).mul(smoothstep(0.62, 0.42, Nw.y).oneMinus()).mul(step(shore, 0.25));
+    If(side.greaterThan(0.01).and(w.x.greaterThan(0.01)), () => {
+      const alongX = abs(Nw.x).greaterThan(abs(Nw.z));
+      const uv = select(alongX, vec2(P.z, P.y), vec2(P.x, P.y)).div(21.6).add(vec2(0.13, 0.71));
+      const s = texture(pebbleShape, uv);
+      const n = s.xyz.mul(2).sub(1);
+      const world = select(alongX, vec3(n.z.mul(sign(Nw.x)), n.y, n.x), vec3(n.x, n.y, n.z.mul(sign(Nw.z))));
+      const tTop = gH.add(side.oneMinus().mul(1.2)),
+        tSide = s.w.add(side.mul(1.2));
+      const top = max(tTop, tSide).sub(mix(0.05, 0.4, far));
+      const toSide = max(tSide.sub(top), 0).div(max(max(tTop.sub(top), 0).add(max(tSide.sub(top), 0)), 1e-4));
+      const sideColor = texture(pebbleMap, uv).rgb;
+      const sideGrey = dot(sideColor, vec3(0.3, 0.55, 0.15));
+      const graded = mix(vec3(sideGrey), sideColor, 0.7).mul(vec3(1, 0.95, 0.84));
+      gColor.assign(mix(gColor, graded.div(graded.mul(0.8).add(1)).mul(1.2), toSide));
+      gNormal.assign(mix(gNormal, vec3(dot(world, tx), dot(world, Nw), dot(world, tz)), toSide));
+      gH.assign(mix(gH, s.w, toSide));
     });
-    If(w.z.greaterThan(0.01), () => {
-      color.addAssign(twoScale(mudMap, q, 1 / 23.5).mul(w.z.mul(0.85)));
-      tangentNormal.addAssign(flatNormal(mudNormal, q.div(23.5)).mul(w.z));
-      rough.addAssign(w.z.mul(0.95));
-    });
+
+    // The rock's height from its own shading (it has no scan of its relief).
+    const rockColor = vec3(0).toVar(),
+      rockWorld = Nw.toVar(),
+      rockH = float(0.5).toVar();
     If(w.w.greaterThan(0.01), () => {
       const rock = triplanar(rockMap, rockNormal, P, Nw, 1 / 27);
+      const lum = dot(rock.color, vec3(0.3, 0.55, 0.15));
       // A cooler, greyer rock than the photograph: northern granite and gneiss.
-      const grey = mix(vec3(dot(rock.color, vec3(0.3, 0.55, 0.15))), rock.color, 0.45).mul(vec3(0.92, 0.95, 1));
-      color.addAssign(grey.mul(w.w));
+      rockColor.assign(mix(vec3(lum), rock.color, 0.45).mul(vec3(0.92, 0.95, 1)));
       rockWorld.assign(rock.normal);
-      rough.addAssign(w.w.mul(0.8));
+      rockH.assign(lum.sub(0.25).mul(1.6).add(0.45).clamp(0, 1));
     });
-    // Close up, the grit between the stones and in the sand: the same ground at a scale
-    // thirty times finer, so nothing a small fish looks at is ever a smear.
+
+    // The grounds by height: each lifted by its share, the tallest showing, the edges soft.
+    const edge = mix(0.06, 0.4, far);
+    const tG = select(w.x.greaterThan(0.005), gH.add(w.x), float(-1));
+    const tS = select(w.y.greaterThan(0.005), sandH.add(w.y), float(-1));
+    const tM = select(w.z.greaterThan(0.005), siltH.add(w.z), float(-1));
+    const tR = select(w.w.greaterThan(0.005), rockH.add(w.w), float(-1));
+    const top = max(max(tG, tS), max(tM, tR)).sub(edge);
+    const b = vec4(max(tG.sub(top), 0), max(tS.sub(top), 0), max(tM.sub(top), 0), max(tR.sub(top), 0));
+    const near = b.div(max(dot(b, vec4(1)), 1e-4));
+    // ...and far off, what the fill leaves covered on average.
+    const covered = select(w.x.greaterThan(0.005), mix(coveredPebbles(fill), coveredStones(fill), broken), float(1));
+    const sandy = smoothstep(-0.05, 0.05, tS.sub(tM));
+    const rocky = near.w;
+    const average = vec4(covered.oneMinus(), covered.mul(sandy), covered.mul(sandy.oneMinus()), 0).mul(rocky.oneMinus()).add(vec4(0, 0, 0, rocky));
+    const wb = mix(near, average, far).toVar();
+    // What the eye sees as the ground's height here: stone tops, or the fill between them.
+    const surface = mix(mix(max(gH, fill), fill, wb.y.add(wb.z)), max(fill, 0.46), far).toVar();
+
+    const color = gColor.mul(wb.x).toVar();
+    const tangentNormal = gNormal.mul(wb.x).toVar();
+    // Gravel: polished, wet tops, gritty hollows -- and rougher where the filtered normals
+    // are short, the stones' slants averaged in one pixel (Toksvig), so nothing far off
+    // sparkles.
+    const polish = mix(0.86, 0.5, smoothstep(0.35, 0.85, gH));
+    const spread = gLength.clamp(0.2, 1);
+    const rough = sqrt(polish.mul(polish).add(spread.oneMinus().div(spread).mul(0.5)).clamp(0, 1)).mul(wb.x).toVar();
+    If(wb.y.greaterThan(0.01), () => {
+      // Sand, with the same two looks against its repeat.
+      const tile = 1 / 20.4;
+      const uvA = q.mul(tile),
+        uvB = turnedUV(q.mul(tile));
+      const sand = vec3(0).toVar(),
+        sn = vec3(0).toVar();
+      If(pick.lessThan(0.999), () => {
+        sand.addAssign(texture(sandMap, uvA).rgb.mul(pick.oneMinus()));
+        sn.addAssign(lookA(texture(sandNormal, uvA).xyz.mul(2).sub(1)).mul(pick.oneMinus()));
+      });
+      If(pick.greaterThan(0.001), () => {
+        sand.addAssign(texture(sandMap, uvB).rgb.mul(pick));
+        sn.addAssign(lookB(texture(sandNormal, uvB).xyz.mul(2).sub(1)).mul(pick));
+      });
+      sn.x.addAssign(cos(P.x.mul(2.6).add(sin(P.z.mul(0.37)).mul(1.8))).mul(0.12));
+      color.addAssign(sand.mul(vec3(0.78, 0.8, 0.82)).mul(wb.y).mul(smoothstep(0.3, 1, ripple.negate()).mul(-0.06).add(1)));
+      tangentNormal.addAssign(normalize(sn).mul(wb.y));
+      rough.addAssign(wb.y.mul(0.88));
+    });
+    If(wb.z.greaterThan(0.01), () => {
+      // Silt. (A forest floor photographed dry: under water its seedlings are grey silt.)
+      const mud = twoScale(mudMap, q, 1 / 23.5);
+      color.addAssign(mix(vec3(dot(mud, vec3(0.3, 0.55, 0.15))), mud, 0.5).mul(0.85).mul(wb.z));
+      tangentNormal.addAssign(flatNormal(mudNormal, q.div(23.5)).mul(wb.z));
+      rough.addAssign(wb.z.mul(0.95));
+    });
+    color.addAssign(rockColor.mul(wb.w));
+    rough.addAssign(wb.w.mul(0.78));
+
+    // Close up, the grit of the sand and the silt: the sand at a scale twenty times finer,
+    // so nothing a small fish looks at is ever a smear.
     const closeUp = smoothstep(0.004, 0.03, px).oneMinus();
     If(closeUp.greaterThan(0).and(shore.lessThan(0.2)), () => {
-      const grit = texture(pebbleMap, q.mul(1.37).add(0.5)).rgb;
-      const gl = dot(grit, vec3(0.3, 0.5, 0.2));
-      color.mulAssign(mix(1, gl.mul(0.7).add(0.72), closeUp.mul(w.x.mul(0.55).add(w.y.mul(0.35)).add(w.z.mul(0.3)))));
-      const gn = flatNormal(pebbleNormal, q.mul(1.37).add(0.5));
-      tangentNormal.addAssign(vec3(gn.x, 0, gn.z).mul(closeUp.mul(0.6).mul(w.x.add(w.y.mul(0.5)))));
+      const grit = dot(texture(sandMap, q.mul(0.9).add(0.5)).rgb, vec3(0.3, 0.5, 0.2));
+      color.mulAssign(mix(1, grit.mul(1.4).add(0.45), closeUp.mul(wb.y.mul(0.5).add(wb.z.mul(0.3)))));
     });
     color.mulAssign(tint);
 
-    // Growth: diatom film and algae where the light reaches, moss in the brook.
+    // Growth: a brown film of diatoms on everything the light reaches, thickest on what
+    // stands up into it; green algae in patches on the tops; in the brook dark moss on the
+    // biggest, steadiest stones. The hollows, where the sand keeps moving, stay clean.
     const light = smoothstep(-0.2, 0.9, Nw.y);
+    const tops = smoothstep(mix(0.35, 0.1, far), mix(0.85, 1, far), surface);
+    const onTop = tops.mul(wb.x.add(wb.w)).add(wb.y.mul(0.25)).add(wb.z.mul(0.4));
     const patchNoise = noise2(q.mul(0.35))
       .mul(0.6)
       .add(noise2(q.mul(1.7).add(3)).mul(0.4));
-    const film = w.x.mul(0.8).add(w.w).add(w.y.mul(0.2)).mul(light).mul(patchNoise.mul(0.6).add(0.4));
+    const film = onTop.mul(0.6).add(0.4).mul(light).mul(patchNoise.mul(0.6).add(0.4));
     color.assign(mix(color, color.mul(vec3(0.8, 0.74, 0.5)), film.mul(0.5)));
-    // Green algae in patches over the stones and gravel where the light is good, then the
-    // darker moss cushions.
-    const algaePatch = smoothstep(0.42, 0.78, noise2(q.mul(0.8).add(7)).mul(0.7).add(patchNoise.mul(0.3)));
-    const algae = mossy.mul(0.75).add(0.25).mul(light).mul(algaePatch).mul(w.x.mul(0.8).add(w.w.mul(0.8)).add(w.y.mul(0.35)));
-    color.assign(mix(color, color.mul(vec3(0.55, 0.85, 0.35)).add(vec3(0.015, 0.035, 0)), algae.mul(0.6)));
-    const moss = mossy.mul(smoothstep(0.36, 0.68, patchNoise.add(Nw.y.mul(0.25)))).mul(w.x.mul(0.7).add(w.w).add(w.y.mul(0.2)));
+    const algaePatch = smoothstep(0.5, 0.8, noise2(q.mul(0.8).add(7)).mul(0.7).add(patchNoise.mul(0.3)));
+    const algae = mossy.mul(0.75).add(0.25).mul(light).mul(algaePatch).mul(onTop);
+    color.assign(mix(color, color.mul(vec3(0.55, 0.85, 0.35)).add(vec3(0.015, 0.035, 0)), algae.mul(0.55)));
+    const moss = mossy
+      .mul(smoothstep(0.5, 0.75, patchNoise.add(Nw.y.mul(0.2))))
+      .mul(wb.x.mul(0.8).add(wb.w))
+      .mul(smoothstep(mix(0.6, 0.4, far), mix(0.85, 0.9, far), surface));
     const mossColor = mix(vec3(0.035, 0.07, 0.02), vec3(0.1, 0.15, 0.04), noise2(q.mul(9)));
-    color.assign(mix(color, mossColor, moss.mul(0.85)));
+    color.assign(mix(color, mossColor, moss.mul(0.8)));
+    rough.assign(mix(rough, 0.95, max(moss, algae.mul(0.6))));
+
+    // The hollows between the stones: less light gets down into them.
+    const hollow = smoothstep(mix(0.62, 0.8, far), mix(0.1, -0.2, far), surface).mul(wb.x.add(wb.w.mul(0.5)));
+    color.mulAssign(hollow.mul(-0.28).add(1));
+    bedShade.assign(hollow.mul(-0.5).add(1));
 
     // Above the water: a dark wet band, then the forest floor, rock where it is steep.
     If(shore.greaterThan(-0.05), () => {
@@ -373,23 +611,20 @@ export async function createBedMaterial() {
       const land = mix(dry, color.mul(0.55), wet);
       color.assign(mix(color, land, smoothstep(-0.05, 0.25, shore)));
     });
-    // The flat maps tilt the geometric normal about their own frame; rock brings its own
-    // world normal from the three projections.
+    // The flat maps tilt the ground's own normal about their frame; rock brings its world
+    // normal from the three projections.
     const tn = normalize(tangentNormal.add(vec3(0, 1e-3, 0)));
-    const up = Nw;
-    const reference = select(abs(up.x).lessThan(0.9), vec3(1, 0, 0), vec3(0, 0, 1));
-    const tx = normalize(reference.sub(up.mul(dot(reference, up))));
-    const tz = normalize(cross(tx, up));
-    const flatWorld = normalize(tx.mul(tn.x).add(up.mul(tn.y)).add(tz.mul(tn.z)));
-    bedNormal.assign(normalize(mix(flatWorld, rockWorld, w.w)));
-    bedRough.assign(rough.clamp(0.4, 1).add(moss.mul(0.1)));
+    const flatWorld = normalize(tx.mul(tn.x).add(Nw.mul(tn.y)).add(tz.mul(tn.z)));
+    bedNormal.assign(normalize(mix(flatWorld, rockWorld, wb.w)));
+    bedRough.assign(rough.clamp(0.4, 1));
     return vec4(color, 1);
   })();
   material.normalNode = toViewNormal(bedNormal);
   material.roughnessNode = bedRough;
+  // (Only the light from all round: the sun and the caustics see the darkened colour.)
+  material.aoNode = bedShade;
   waterLit(material);
   material.userData.tint = tint;
-  material.userData.maps = { rockMap, rockNormal, pebbleMap, pebbleNormal };
   return material;
 }
 
