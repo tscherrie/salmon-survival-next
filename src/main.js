@@ -49,6 +49,7 @@ import { createScent } from "./scent.js";
 import { createRedd } from "./redd.js";
 import { mode } from "./vegan.js";
 import { TRAITS, STEP, earned, heritage, inherit, loadHeritage, resetHeritage, traits as heritageTraits } from "./heritage.js";
+import { dither } from "./render/dither.js";
 
 // English over the German, unless the player chose German.
 startTranslation();
@@ -2534,6 +2535,9 @@ async function start() {
     camera.updateMatrixWorld();
     post.jitter();
     if (settings.taa) shadowFrame(key, shadowRadius, frames);
+    // (Leaves' left-out pixels: a new share each frame for the resolve, a fixed cut without it.)
+    dither.on.value = settings.taa ? 1 : 0;
+    dither.frame.value = settings.taa ? frames % 64 : 0;
     // Above the water the world it mirrors, first (the sun's shadow map is drawn for it and
     // not again for the eye: the light's frame is the same).
     if (waterMirror && above) {

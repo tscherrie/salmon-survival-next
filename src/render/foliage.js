@@ -48,6 +48,7 @@ import {
 import { range, smoothstep as smoothJS, vec } from "./geometry.js";
 import { FLOW_DIRECTION, currentStrength, surfaceLevelAt, waterLit, waterTime } from "./water.js";
 import { flowAt } from "../flowfield.js";
+import { ditherThreshold } from "./dither.js";
 
 // Shared foliage construction: the current model in the vertex stage, the submerged leaf
 // material, and the blade and stem generators every plant species is built from.
@@ -148,8 +149,8 @@ export function foliageMaterial() {
     side: THREE.DoubleSide,
   });
   // See-through tissue: a share of the pixels left out, differently each frame, for the
-  // temporal resolve to average into a soft transparency (there is no multisampling).
-  material.alphaHash = true;
+  // temporal resolve to average into a soft transparency (render/dither.js).
+  material.alphaTestNode = ditherThreshold();
   material.positionNode = strandPosition();
   const thin = attribute("thin", "vec2").x;
   const leafUv = uv();
@@ -165,14 +166,14 @@ export function foliageMaterial() {
     base.assign(mix(base, base.mul(1.22).add(vec3(0.008, 0.012, 0)), midrib.mul(0.6)));
     // Leaf undersides are paler and warmer than the upper surface.
     base.mulAssign(select(faceDirection.lessThan(0), vec3(0.82, 0.76, 0.66), vec3(1)));
-    // Thin tissue lets part of the scene behind show through: ribbon leaves pass a quarter
-    // of the light, their thinner edges half.
-    const alpha = select(thin.lessThan(0.7), float(1), select(edge.greaterThan(0.45), float(0.5), float(0.75))).toVar();
+    // (Thin tissue passes light, which the lighting below gives it; a leaf itself is drawn
+    // whole: left-out pixels would read as a grain wherever the view moves.)
+    const alpha = float(1).toVar();
     // A leaf right in front of the lens thins away rather than filling the picture -- but not
     // a leaf lying flat on the bed (marked by a thinness of exactly 0.12), which would only
     // show as a pale, see-through patch on the ground.
     If(abs(thin.sub(0.12)).greaterThan(0.005), () => {
-      alpha.mulAssign(smoothstep(0.35, 1.5, length(positionWorld.sub(cameraPosition))));
+      alpha.mulAssign(smoothstep(0.25, 0.8, length(positionWorld.sub(cameraPosition))));
     });
     alpha.mulAssign(vPlantFade);
     return vec4(base, alpha);

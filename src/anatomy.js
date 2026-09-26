@@ -1071,15 +1071,16 @@ export function createFishMaterials(coat, plan, { uniforms = null } = {}) {
     iridescenceIOR: 1.38,
     iridescenceThicknessRange: [200, 420],
   });
-  // The fins' see-through membrane is dithered (a share of the pixels left out, differently
-  // each frame, for the temporal resolve to average), not blended: the fins of a whole
-  // school are one draw, and blended they could not be sorted -- a far fin showed over a
-  // near one. Dithered they sit in depth like anything solid, and cast their shadows.
+  // The fins' see-through membrane, blended. The fins of a whole school are one draw that no
+  // sort can order, so they write their depth as well: a far fin then never shows over a
+  // near one (at worst it is hidden behind it), and there is no grain of left-out pixels.
   const fins = new THREE.MeshStandardNodeMaterial({
     color: 0xffffff,
     metalness: 0.05,
     roughness: 0.45,
-    alphaHash: true,
+    transparent: true,
+    depthWrite: true,
+    forceSinglePass: true,
     side: THREE.DoubleSide,
   });
   return { skin, fins, uniforms: u, plan };
@@ -1499,7 +1500,7 @@ export function createFishMesh(scene, kind, coat, count, { name = kind, castShad
   shadeFish(materials, body, membranes);
   body.name = name;
   membranes.name = `${name} fins`;
-  body.castShadow = membranes.castShadow = castShadow;
+  body.castShadow = castShadow;
   body.receiveShadow = true;
   for (const mesh of [body, membranes]) {
     mesh.frustumCulled = false;
