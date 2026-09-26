@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import {
+  Break,
   Fn,
   If,
   Loop,
@@ -339,7 +340,9 @@ const lookB = (n) => vec3(n.x.mul(0.8).sub(n.y.mul(0.6)), n.z, n.x.mul(0.6).add(
 const coveredPebbles = (fill) => smoothstep(-0.14, 0.98, fill);
 const coveredStones = (fill) => smoothstep(-0.02, 1.06, fill);
 
-export async function createBedMaterial() {
+// relief: close by, the gravel in relief (Hoch and Ultra, which have the temporal resolve
+// to smooth it): the view is carried through the stones' heights until it meets them.
+export async function createBedMaterial({ relief = false } = {}) {
   const pebbleMap = load("ganges_river_pebbles_diff", true),
     stonesMap = load("river_small_rocks_diff", true),
     sandMap = load("damp_sand_diff", true),
@@ -367,7 +370,18 @@ export async function createBedMaterial() {
     const P = positionWorld;
     const shore = extra.x,
       mossy = extra.y,
-      broken = extra.z.clamp(0, 1);
+      broken = float(0).toVar();
+    broken.assign(extra.z.clamp(0, 1));
+    // The ground's own place, and how it changes across the pixel (taken here, outside
+    // every branch; the photographs are read with these slopes wherever the relief moves
+    // the look, or at a stone's edge they would pick a blurred copy). Assigned, not just
+    // declared: a variable only declared is worked out where it is first read, and in a
+    // branch or a loop a slope is anybody's guess.
+    const q0 = P.xz;
+    const dqx = vec2(0).toVar(),
+      dqy = vec2(0).toVar();
+    dqx.assign(dFdx(q0));
+    dqy.assign(dFdy(q0));
     const Nw = normalize(geometryNormal).toVar();
     // Where the drawn surface stands far steeper than its normal says (the skirts that hide
     // the seams between blocks, a cut bank), trust the surface; and a face this steep is
@@ -386,22 +400,35 @@ export async function createBedMaterial() {
     const reference = select(abs(Nw.x).lessThan(0.9), vec3(1, 0, 0), vec3(0, 0, 1));
     const tx = normalize(reference.sub(Nw.mul(dot(reference, Nw)))).toVar();
     const tz = normalize(cross(tx, Nw)).toVar();
-    const q = P.xz;
+    const q = q0.toVar();
+    // A photograph read at uv (a look of it at tile, A or turned B) with the slopes of the
+    // unmoved ground.
+    const read = (map, uv, tile, turnedLook = false) => {
+      if (!relief) return texture(map, uv);
+      const gx = dqx.mul(tile),
+        gy = dqy.mul(tile);
+      return turnedLook ? texture(map, uv).grad(turned(gx), turned(gy)) : texture(map, uv).grad(gx, gy);
+    };
     // How big a pixel is on the ground: far off the stones are too small to tell apart, the
     // heights in the photographs are filtered to their mean, and the bed is drawn from what
     // it holds on average instead.
-    const px = length(fwidth(q));
-    const far = smoothstep(0.03, 0.25, px);
+    // (All of these from the unmoved ground, and worked out here, before the relief moves
+    // the look: its slopes jump at every stone's edge.)
+    const px = float(0).toVar(),
+      far = float(0).toVar();
+    px.assign(length(fwidth(q0)));
+    far.assign(smoothstep(0.03, 0.25, px));
 
     // Where the course lays both, gravel and sand in patches: bars of clean stones, sandy
     // flats.
-    const patch = noise2(q.mul(0.06).add(1.7)).mul(0.65).add(noise2(q.mul(0.17).add(4.1)).mul(0.35)).sub(0.5);
+    const patch = noise2(q0.mul(0.06).add(1.7)).mul(0.65).add(noise2(q0.mul(0.17).add(4.1)).mul(0.35)).sub(0.5);
     const shift = patch.mul(0.5).mul(min(1, w.x.mul(w.y).mul(4)));
     w.x.assign(max(w.x.sub(shift), 0));
     w.y.assign(max(w.y.add(shift), 0));
 
     // Which look of each photograph shows where: a slow noise, sharpened.
-    const pick = smoothstep(0.45, 0.55, noise2(q.mul(0.045).add(5.3)));
+    const pick = float(0).toVar();
+    pick.assign(smoothstep(0.45, 0.55, noise2(q0.mul(0.045).add(5.3))));
 
     // The level sand and silt fill to between the stones: the more of them the course
     // lays, the higher, until only the tops of the tallest stones show. Ripples in the sand.
@@ -410,6 +437,127 @@ export async function createBedMaterial() {
     const siltH = float(0.3);
     const fill = max(sandH.add(w.y.sub(w.x)), siltH.add(w.z.sub(w.x))).toVar();
 
+    // Close by, the gravel in relief: the view is stepped down through the ground's height
+    // (the stones as the colour below blends them, the fill of sand between) until it meets
+    // it, then closed in on the meeting, and everything is read where it met. It enters half
+    // the relief above the drawn surface, so the ground's mean stays where it is drawn and
+    // what stands on it (plants, boulders, the small stones) still stands on it.
+    const reliefFade = float(0).toVar(),
+      wall = float(0).toVar();
+    if (relief) {
+      const eye = P.sub(cameraPosition);
+      const dist = length(eye);
+      const V = eye.div(max(dist, 1e-4));
+      reliefFade.assign(
+        smoothstep(13, 5, dist)
+          .mul(smoothstep(0.05, 0.35, w.x))
+          .mul(smoothstep(0.2, 0.5, dot(V, Nw).negate()))
+          .mul(smoothstep(0.8, 0.9, Nw.y))
+          .mul(smoothstep(0.97, 0.8, fill))
+          .mul(step(shore, 0.25))
+          .mul(far.oneMinus()),
+      );
+      If(reliefFade.greaterThan(0.01), () => {
+        // The height of the stones at a point, blended exactly as the colour blends them.
+        const lookHeight = (shapeMap, p, tile) => {
+          const a = float(0.5).toVar(),
+            b = float(0.5).toVar();
+          If(pick.lessThan(0.999), () => {
+            a.assign(read(shapeMap, p.mul(tile), tile).a);
+          });
+          If(pick.greaterThan(0.001), () => {
+            b.assign(read(shapeMap, turnedUV(p.mul(tile)), tile, true).a);
+          });
+          const tA = a.add(pick.oneMinus().mul(1.5)),
+            tB = b.add(pick.mul(1.5));
+          const top = max(tA, tB).sub(0.05);
+          return mix(a, b, max(tB.sub(top), 0).div(max(max(tA.sub(top), 0).add(max(tB.sub(top), 0)), 1e-4)));
+        };
+        const heightAt = (p, out) => {
+          out.assign(lookHeight(pebbleShape, p, 1 / 21.6));
+          If(broken.greaterThan(0.01), () => {
+            const hS = lookHeight(stonesShape, p, 1 / 29);
+            const tP = out.add(broken.oneMinus().mul(1.2)),
+              tS = hS.add(broken.mul(1.2));
+            const top = max(tP, tS).sub(0.05);
+            out.assign(mix(out, hS, max(tS.sub(top), 0).div(max(max(tP.sub(top), 0).add(max(tS.sub(top), 0)), 1e-4))));
+          });
+          out.assign(max(out, fill));
+        };
+        // (Every point the march reads is a variable given its value where it is read: a
+        // shared expression is worked out once, wherever it first comes up, and one that
+        // first comes up in a branch not taken would be read as nothing.)
+        const down = max(V.y.negate(), 0.35);
+        const steps = 8;
+        const layer = 1 / steps;
+        const total = vec2(0).toVar(),
+          start = vec2(0).toVar(),
+          stepShift = vec2(0).toVar();
+        total.assign(V.xz.div(down).mul(0.18).mul(reliefFade));
+        start.assign(q0.sub(total.mul(0.5)));
+        stepShift.assign(total.mul(layer));
+        const ray = float(1).toVar(),
+          off = vec2(0).toVar(),
+          at = vec2(0).toVar(),
+          here = float(0).toVar(),
+          before = float(0).toVar(),
+          rayBefore = float(1).toVar(),
+          stepped = float(0).toVar();
+        Loop(steps + 1, () => {
+          at.assign(start.add(off));
+          heightAt(at, here);
+          If(here.greaterThanEqual(ray), () => {
+            Break();
+          });
+          before.assign(here);
+          rayBefore.assign(ray);
+          ray.subAssign(layer);
+          off.addAssign(stepShift);
+          stepped.assign(1);
+        });
+        // Between the last step above the stones and the first below: halved twice, then
+        // the crossing taken on the straight line between the two.
+        If(stepped.greaterThan(0), () => {
+          const loOff = vec2(0).toVar(),
+            loRay = float(0).toVar(),
+            loH = float(0).toVar(),
+            hiOff = vec2(0).toVar(),
+            hiRay = float(0).toVar(),
+            hiH = float(0).toVar(),
+            midOff = vec2(0).toVar(),
+            midRay = float(0).toVar(),
+            midH = float(0).toVar();
+          loOff.assign(off.sub(stepShift));
+          loRay.assign(rayBefore);
+          loH.assign(before);
+          hiOff.assign(off);
+          hiRay.assign(ray);
+          hiH.assign(here);
+          for (let k = 0; k < 2; k++) {
+            midOff.assign(loOff.add(hiOff).mul(0.5));
+            midRay.assign(loRay.add(hiRay).mul(0.5));
+            at.assign(start.add(midOff));
+            heightAt(at, midH);
+            If(midH.greaterThanEqual(midRay), () => {
+              hiOff.assign(midOff);
+              hiRay.assign(midRay);
+              hiH.assign(midH);
+            }).Else(() => {
+              loOff.assign(midOff);
+              loRay.assign(midRay);
+              loH.assign(midH);
+            });
+          }
+          const a = loRay.sub(loH),
+            b = hiH.sub(hiRay);
+          off.assign(mix(loOff, hiOff, a.div(max(a.add(b), 1e-4))));
+          // (Met on a stone's flank: the ground rose far more than the view fell.)
+          wall.assign(smoothstep(1.5, 6, hiH.sub(loH).div(max(loRay.sub(hiRay), 1e-4))));
+        });
+        q.assign(start.add(off));
+      });
+    }
+
     // Gravel: the two looks of each photograph, the taller stone winning where they meet;
     // then pebbles and broken stones side by side the same way.
     const gColor = vec3(0).toVar(),
@@ -417,15 +565,17 @@ export async function createBedMaterial() {
       gH = float(0.43).toVar(),
       gLength = float(1).toVar();
     const gravelOf = (map, shapeMap, tile) => {
-      const uvA = q.mul(tile),
-        uvB = turnedUV(q.mul(tile));
+      const uvA = vec2(0).toVar(),
+        uvB = vec2(0).toVar();
+      uvA.assign(q.mul(tile));
+      uvB.assign(turnedUV(q.mul(tile)));
       const a = vec4(0.5, 0.5, 1, 0.5).toVar(),
         b = vec4(0.5, 0.5, 1, 0.5).toVar();
       If(pick.lessThan(0.999), () => {
-        a.assign(texture(shapeMap, uvA));
+        a.assign(read(shapeMap, uvA, tile));
       });
       If(pick.greaterThan(0.001), () => {
-        b.assign(texture(shapeMap, uvB));
+        b.assign(read(shapeMap, uvB, tile, true));
       });
       const tA = a.w.add(pick.oneMinus().mul(1.5)),
         tB = b.w.add(pick.mul(1.5));
@@ -434,10 +584,10 @@ export async function createBedMaterial() {
       const toB = max(tB.sub(top), 0).div(max(max(tA.sub(top), 0).add(max(tB.sub(top), 0)), 1e-4));
       const color = vec3(0).toVar();
       If(toB.lessThan(0.999), () => {
-        color.addAssign(texture(map, uvA).rgb.mul(toB.oneMinus()));
+        color.addAssign(read(map, uvA, tile).rgb.mul(toB.oneMinus()));
       });
       If(toB.greaterThan(0.001), () => {
-        color.addAssign(texture(map, uvB).rgb.mul(toB));
+        color.addAssign(read(map, uvB, tile, true).rgb.mul(toB));
       });
       // (The normals' length before they are made unit again: short where the finer mips
       // average stones of every slant, which is roughness the lighting must know about.)
@@ -536,17 +686,19 @@ export async function createBedMaterial() {
     If(wb.y.greaterThan(0.01), () => {
       // Sand, with the same two looks against its repeat.
       const tile = 1 / 20.4;
-      const uvA = q.mul(tile),
-        uvB = turnedUV(q.mul(tile));
+      const uvA = vec2(0).toVar(),
+        uvB = vec2(0).toVar();
+      uvA.assign(q.mul(tile));
+      uvB.assign(turnedUV(q.mul(tile)));
       const sand = vec3(0).toVar(),
         sn = vec3(0).toVar();
       If(pick.lessThan(0.999), () => {
-        sand.addAssign(texture(sandMap, uvA).rgb.mul(pick.oneMinus()));
-        sn.addAssign(lookA(texture(sandNormal, uvA).xyz.mul(2).sub(1)).mul(pick.oneMinus()));
+        sand.addAssign(read(sandMap, uvA, tile).rgb.mul(pick.oneMinus()));
+        sn.addAssign(lookA(read(sandNormal, uvA, tile).xyz.mul(2).sub(1)).mul(pick.oneMinus()));
       });
       If(pick.greaterThan(0.001), () => {
-        sand.addAssign(texture(sandMap, uvB).rgb.mul(pick));
-        sn.addAssign(lookB(texture(sandNormal, uvB).xyz.mul(2).sub(1)).mul(pick));
+        sand.addAssign(read(sandMap, uvB, tile, true).rgb.mul(pick));
+        sn.addAssign(lookB(read(sandNormal, uvB, tile, true).xyz.mul(2).sub(1)).mul(pick));
       });
       sn.x.addAssign(cos(P.x.mul(2.6).add(sin(P.z.mul(0.37)).mul(1.8))).mul(0.12));
       color.addAssign(sand.mul(vec3(0.78, 0.8, 0.82)).mul(wb.y).mul(smoothstep(0.3, 1, ripple.negate()).mul(-0.06).add(1)));
@@ -567,7 +719,7 @@ export async function createBedMaterial() {
     // so nothing a small fish looks at is ever a smear.
     const closeUp = smoothstep(0.004, 0.03, px).oneMinus();
     If(closeUp.greaterThan(0).and(shore.lessThan(0.2)), () => {
-      const grit = dot(texture(sandMap, q.mul(0.9).add(0.5)).rgb, vec3(0.3, 0.5, 0.2));
+      const grit = dot(read(sandMap, q.mul(0.9).add(0.5), 0.9).rgb, vec3(0.3, 0.5, 0.2));
       color.mulAssign(mix(1, grit.mul(1.4).add(0.45), closeUp.mul(wb.y.mul(0.5).add(wb.z.mul(0.3)))));
     });
     color.mulAssign(tint);
@@ -596,8 +748,10 @@ export async function createBedMaterial() {
 
     // The hollows between the stones: less light gets down into them.
     const hollow = smoothstep(mix(0.62, 0.8, far), mix(0.1, -0.2, far), surface).mul(wb.x.add(wb.w.mul(0.5)));
-    color.mulAssign(hollow.mul(-0.28).add(1));
-    bedShade.assign(hollow.mul(-0.5).add(1));
+    // (And in relief, a stone's steep flanks, which the view slides down when low: shaded.)
+    const flank = max(smoothstep(0.8, 0.35, normalize(gNormal).y), wall).mul(wb.x).mul(reliefFade);
+    color.mulAssign(hollow.mul(-0.28).add(1).mul(flank.mul(-0.45).add(1)));
+    bedShade.assign(hollow.mul(-0.5).add(1).mul(flank.mul(-0.35).add(1)));
 
     // Above the water: a dark wet band, then the forest floor, rock where it is steep.
     If(shore.greaterThan(-0.05), () => {

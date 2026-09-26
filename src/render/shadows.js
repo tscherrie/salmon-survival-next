@@ -27,7 +27,10 @@ export function softShadowFilter({
     // Where the fallback to WebGL 2 draws, the map cannot be read texel by texel alongside
     // its comparisons: an even soft edge instead, the same spiral at a fixed width.
     if (builder.renderer.backend.isWebGLBackend) {
-      const spinGL = interleavedGradientNoise(screenCoordinate.xy).mul(6.2831853);
+      // (Worked out once, before the loop: an expression first met inside a loop is worked
+      // out again on every pass.)
+      const spinGL = float(0).toVar();
+      spinGL.assign(interleavedGradientNoise(screenCoordinate.xy).mul(6.2831853));
       const width = float(1).div(mapSize.x).mul(2.5);
       const sumGL = float(0).toVar();
       Loop(filterSamples, ({ i }) => {
@@ -44,7 +47,8 @@ export function softShadowFilter({
     // The light's shadow radius carries the frame number in its fraction (see shadowFrame
     // below), so the spiral turns from frame to frame as well as from pixel to pixel.
     const frameIndex = floor(fract(radiusSetting).mul(1000).add(0.5));
-    const spin = interleavedGradientNoise(screenCoordinate.xy.add(frameIndex.mul(5.588238))).mul(6.2831853);
+    const spin = float(0).toVar();
+    spin.assign(interleavedGradientNoise(screenCoordinate.xy.add(frameIndex.mul(5.588238))).mul(6.2831853));
     // The plain comparison at the point itself, first: the map's one binding then takes the
     // comparing sampler that the filter below needs (the blocker search reads texels directly).
     const here = texture(depthTexture, shadowCoord.xy).compare(receiver.sub(0.0004)).toVar();

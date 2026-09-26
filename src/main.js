@@ -186,7 +186,7 @@ async function start() {
   const ripples = createRipples();
   const skyDome = createSky(scene);
   mark("setup");
-  const [bedMaterial, rocks] = await Promise.all([createBedMaterial(), createRockMaterials()]);
+  const [bedMaterial, rocks] = await Promise.all([createBedMaterial({ relief: settings.detail && settings.taa }), createRockMaterials()]);
   mark("textures");
   const surfaceMaterial = createSurfaceMaterial({ clear: settings.clearWater });
   const waterMirror = settings.clearWater ? createMirror(renderer, { scale: 0.5 }) : null;
